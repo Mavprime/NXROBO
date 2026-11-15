@@ -1,0 +1,28 @@
+<!--
+  只起 NPU 检测节点（相机与其它节点在别处跑）。
+
+  最常用的是换模型与阈值，不必改 semi_auto.launch：
+
+    run roslaunch semi_auto_match_24 detect_rknn.launch \
+        model_path:=/data/local/release/rknn-demo/model/yolov5s-640-640.rknn
+
+  没有相机时可以把 image 话题 remap 到任意静态图发布器做整链验证：
+
+    run roslaunch semi_auto_match_24 detect_rknn.launch image_topic:=/some/image
+-->
+<launch>
+	<arg name="image_topic" default="/camera/color/image_rect_color"
+	     doc="d435: /camera/color/image_rect_color 或 /camera/color/image_raw；astra/astrapro: /camera/rgb/image_raw"/>
+	<arg name="model_path" default="" doc="留空则用 config/yolo/detect_rknn.yaml 里的值"/>
+	<arg name="conf_thres" default="" doc="留空则用 yaml 里的值"/>
+	<arg name="publish_debug_image" default="" doc="留空则用 yaml 里的值"/>
+
+	<node pkg="semi_auto_match_24" name="detect_rknn" type="detect_rknn.py" output="screen">
+		<rosparam command="load" file="$(find semi_auto_match_24)/config/yolo/detect_rknn.yaml"/>
+		<param name="model_path" value="$(arg model_path)" if="$(eval arg('model_path') != '')"/>
+		<param name="conf_thres" value="$(arg conf_thres)" if="$(eval arg('conf_thres') != '')"/>
+		<param name="publish_debug_image" value="$(arg publish_debug_image)"
+		       if="$(eval arg('publish_debug_image') != '')"/>
+		<remap from="image" to="$(arg image_topic)"/>
+	</node>
+</launch>

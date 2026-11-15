@@ -1,0 +1,5 @@
+# grasp.py 的抓取高度 —— 
+#
+# 单位是 **毫米**：swiftpro 的 position.z 直接拼成 Gcode "G0 X.. Y.. Z.."，
+z_up: 20
+z_down: -45
