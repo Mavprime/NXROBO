@@ -203,7 +203,7 @@ def main():
                         linear, angular = -LIN_SPEED, 0.0
                     elif key == "a":
                         linear, angular = 0.0, ANG_SPEED
-                    else:
+                    elif key== "d":
                         linear, angular = 0.0, -ANG_SPEED
                     last_base_key = now
                 elif char in "82794613":                 # arm
