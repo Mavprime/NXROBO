@@ -2,297 +2,96 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Spark Robot - Setup, Commands and Scripts</title>
+<title>Spark Robot - Quick Commands</title>
 <style>
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11pt; line-height: 1.35; }
-  h1 { font-size: 20pt; }
-  h2 { font-size: 15pt; border-bottom: 1px solid #999; padding-bottom: 2px; }
-  h3 { font-size: 12pt; }
-  pre { font-family: "Courier New"; font-size: 9pt; background: #f2f2f2; border: 1px solid #cccccc; padding: 6px; }
-  code { font-family: "Courier New"; font-size: 9.5pt; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { border: 1px solid #999999; padding: 4px; vertical-align: top; }
-  th { background: #e6e6e6; text-align: left; }
-  .note { background: #fff4d6; border-left: 4px solid #e0a800; padding: 6px; }
-  .warn { background: #ffe6e6; border-left: 4px solid #c00000; padding: 6px; }
+  body { font-family: sans-serif; max-width: 900px; margin: 2em auto; line-height: 1.5; }
+  h1 { border-bottom: 2px solid #333; padding-bottom: .3em; }
+  h2 { margin-top: 1.6em; }
+  pre { background: #f2f2f2; padding: .8em; overflow-x: auto; }
+  code { background: #f2f2f2; padding: 0 .2em; }
+  .note { background: #fff8e1; padding: .7em; border-left: 4px solid #f0c000; }
 </style>
 </head>
 <body>
 
-<h1>Spark Robot &mdash; Setup, Commands and Scripts</h1>
-<p><strong>Prepared:</strong> 2026-11-13 &nbsp;|&nbsp; <strong>Robot:</strong> Spark-H (NXROBO) &nbsp;|&nbsp; <strong>OS:</strong> Ubuntu 20.04.5 LTS &nbsp;|&nbsp; <strong>ROS:</strong> Noetic</p>
+<h1>Spark Robot - Quick Commands</h1>
+<p>Run these after every boot. <code>source</code> only loads the ROS environment; the server
+terminal starts the ROS master and the hardware drivers.</p>
 
-<h2>1. Quick facts</h2>
-<table width="100%" border="1" cellspacing="0" cellpadding="4">
-<tr><th width="30%">Item</th><th width="70%">Value</th></tr>
-<tr><td>Robot IP (current)</td><td><code>10.25.141.8</code></td></tr>
-<tr><td>SSH login</td><td>user <code>spark</code>, password <code>spark</code></td></tr>
-<tr><td>Robot workspace</td><td><code>/home/spark/spark_noetic</code></td></tr>
-<tr><td>HarmonyOS workspace</td><td><code>/home/spark/UBUNTU20_0</code></td></tr>
-<tr><td>Hand-eye calibration file</td><td><code>/home/spark/thefile.txt</code></td></tr>
-<tr><td>Robot serial ports</td><td><code>/dev/sparkBase</code> (base), <code>/dev/SPARK-HM-PI</code> (star board)</td></tr>
-<tr><td>Star-board WiFi config</td><td><code>/home/spark/wifi_info.txt</code></td></tr>
-<tr><td>Star-board IP (configured)</td><td><code>192.168.124.121</code>, SSID <code>OpenHarmony_2</code>, gateway <code>192.168.124.1</code></td></tr>
-</table>
+<h2>0. Copy your codes/ folder to the robot (from your PC)</h2>
+<pre>rsync -av "&lt;local-dir&gt;/" &lt;user&gt;@&lt;robot-ip&gt;:&lt;remote-dir&gt;/</pre>
+<p>Run this on your <strong>PC</strong>, not inside the robot's shell. Example for the usual layout
+(local repo &rarr; <code>~/codes</code> on the robot):</p>
+<pre>rsync -av "/home/mav/Documents/Extra/ROS Comp/codes/" spark@&lt;robot-ip&gt;:~/codes/</pre>
+<p>The trailing slash on the source copies the folder's <em>contents</em>; without it you get a
+nested <code>codes/codes</code>. The default SSH password on the Spark boards is
+<code>123456</code>.</p>
+<div class="note">
+<p>If <code>rsync</code> is not available, use <code>scp</code> instead:</p>
+<pre>scp -r "&lt;local-dir&gt;" &lt;user&gt;@&lt;robot-ip&gt;:&lt;remote-dir&gt;</pre>
+</div>
 
-<h2>2. Connecting to the robot</h2>
-<h3>2.1 SSH (Linux / macOS / Windows 10+)</h3>
-<pre>ssh spark@10.25.141.8
-# password: spark</pre>
-
-<h3>2.2 Windows GUI client - MobaXterm</h3>
-<p>MobaXterm is Windows-only. Install it from
-<code>M-Robots 半自动赛资料/Tools/MobaXterm_Installer_v26.6.zip</code> (run the MSI with the DAT file in the same folder).
-Create a new SSH session:</p>
-<table width="100%" border="1" cellspacing="0" cellpadding="4">
-<tr><th width="30%">Field</th><th width="70%">Value</th></tr>
-<tr><td>Remote host</td><td>10.25.141.8</td></tr>
-<tr><td>Port</td><td>22</td></tr>
-<tr><td>Username</td><td>spark</td></tr>
-<tr><td>Password</td><td>spark</td></tr>
-</table>
-<p>On Ubuntu, use the terminal <code>ssh</code> command or Remmina (SSH/SFTP/VNC).</p>
-
-<h3>2.3 If the IP changed</h3>
-<p>The robot gets its address over DHCP; it can change after a reconnect. On the robot:</p>
-<pre>hostname -I
-ip -br addr show wlo1</pre>
-<p>Or press the robot's AP/network button once - Spark announces its current IP.</p>
-
-<h3>2.4 GUI programs over SSH (RViz, OpenCV windows)</h3>
-<p>SSH sessions have no display by default. Before launching anything graphical:</p>
-<pre>export DISPLAY=:0
-export XAUTHORITY=$HOME/.Xauthority</pre>
-<p>Windows then appear on the robot's own screen. For X forwarding from your PC, connect with <code>ssh -X spark@10.25.141.8</code>.</p>
-
-<h2>3. ROS environment</h2>
-<h3>3.1 Standard workspace</h3>
-<pre>cd ~/spark_noetic
-source devel/setup.bash</pre>
-
-<h3>3.2 HarmonyOS workspace (Spark-H match code)</h3>
-<p>The HM packages live in <code>~/UBUNTU20_0/src/3rd_app</code>, but that workspace's
-<code>devel/.catkin</code> still points at <code>~/spark_noetic/src</code>, so they are not
-registered by default. Add the source tree explicitly:</p>
+<h2>1. Server terminal (keep it open)</h2>
 <pre>source ~/spark_noetic/devel/setup.bash
-source ~/UBUNTU20_0/devel/setup.bash
-export ROS_PACKAGE_PATH=$HOME/UBUNTU20_0/src:$ROS_PACKAGE_PATH
+roslaunch ~/codes/server.launch</pre>
+<p>Starts the ROS master, the base driver, and the arm driver. It does not start the camera or the
+lidar.</p>
 
-rospack find spark_hm_pi
-rospack find spark_hm_task_match</pre>
-<p><strong>Note:</strong> Permanent fix (optional): <code>cd ~/UBUNTU20_0 &amp;&amp; catkin_make</code>. This rebuilds the workspace and rewrites <code>.catkin</code>; it can take several minutes.</p>
-
-<h3>3.3 Useful ROS checks</h3>
-<pre>rosnode list
-rostopic list
-rostopic hz /camera/color/image_raw
-pgrep -af "roslaunch|rosmaster"</pre>
-
-<h2>4. Starting the camera and the arm</h2>
-<h3>4.1 Camera + base + lidar</h3>
-<pre>cd ~/spark_noetic
-source devel/setup.bash
-roslaunch spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6</pre>
-<p>Verify the stream in another terminal:</p>
-<pre>rostopic hz /camera/color/image_raw    # expect about 30 Hz</pre>
-<p>Live view (on the robot screen):</p>
-<pre>export DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority
-rosrun image_view image_view image:=/camera/color/image_raw</pre>
-
-<h3>4.2 Arm driver (uArm)</h3>
-<pre>cd ~/spark_noetic
-source devel/setup.bash
-roslaunch swiftpro pro_control_nomoveit.launch</pre>
-<p>Check that the arm is detected first:</p>
-<pre>lsusb | grep -E '2341:0042|2e88:4603'
-# 2341:0042 = uArm, 2e88:4603 = Sagittarius</pre>
-<p><strong>Warning:</strong> If the arm is not in <code>lsusb</code>, power on the arm and check its USB cable to the expansion dock. Calibration and motion commands do nothing without it.</p>
-
-<h2>5. Hand-eye calibration (arm + camera)</h2>
-<h3>5.1 Prerequisites</h3>
-<ul>
-<li>Camera mounted upside-down, looking down.</li>
-<li>Red calibration block attached directly above the suction-cup mount.</li>
-<li>Arm powered; e-stop released.</li>
-<li>Display environment exported (section 2.4).</li>
-</ul>
-
-<h3>5.2 Run</h3>
-<pre>export DISPLAY=:0
-export XAUTHORITY=$HOME/.Xauthority
-cd ~/spark_noetic
-./onekey.sh        # 8 (arm-camera calibration) -> 2 (uArm) -> Enter</pre>
-<p>Two OpenCV windows open (the main one is titled <code>win_draw</code>). Rotate the D435 so the
-<strong>red block lies inside the green rectangle</strong>, then press any key in the helper
-terminal (or publish the start message manually):</p>
-<pre>rostopic pub /start_topic std_msgs/String "data: 'start'" -1</pre>
-<p>The arm moves through 20 poses. At 20/20 it writes <code>~/thefile.txt</code> and prints two
-regression lines. Press <code>Ctrl+C</code> in the launching terminal to stop.</p>
-
-<h3>5.3 Calibration file format</h3>
-<pre>k1 b1 k2 b2
-x = k1 * yc + b1
-y = k2 * xc + b2</pre>
-<p><code>xc, yc</code> = blue/red object centroid in pixels; <code>x, y</code> = arm coordinates in mm.</p>
-<p>Current values (2026-11-13 21:30):</p>
-<pre>-0.7762224121275175 439.40871851081226 -0.4913502764702656 204.47386347140525</pre>
-
-<h2>6. Moving the arm manually</h2>
-<p>Topic: <code>/position_write_topic</code>, type <code>swiftpro/position</code> (<code>float64 x, y, z</code>).</p>
-<pre># hover 20 mm above a point
-rostopic pub -1 /position_write_topic swiftpro/position "{x: 198.8, y: 0.6, z: 20.0}"
-
-# lower onto the object (touch / pick height)
-rostopic pub -1 /position_write_topic swiftpro/position "{x: 198.8, y: 0.6, z: -50.0}"
-
-# home
-rostopic pub -1 /position_write_topic swiftpro/position "{x: 120.0, y: 0.0, z: 35.0}"</pre>
-<p>Or use the helper script (section 8):</p>
-<pre>python3 ~/codes/arm_move.py --x 198.8 --y 0.6 --z 20
-python3 ~/codes/arm_move.py --home</pre>
-<p><strong>Note:</strong> The arm moves directly to the pose. Keep hands clear. If it stops short, use z = -60; if it presses too hard, use z = -40.</p>
-
-<h2>7. Blue-box detection</h2>
-<h3>7.1 HSV thresholds</h3>
-<p>The grasp demo originally used <code>H 100-130, S &gt;= 90, V &gt;= 80</code>. The light-blue cube in
-the lab has mean <code>H 86, S 75, V 142</code>, which fragmented under that filter. The detector
-was patched to:</p>
-<pre>LowerBlue = np.array([90, 50, 50])
-UpperBlue = np.array([135, 255, 255])</pre>
-<p>Original file backed up as
-<code>~/spark_noetic/src/spark_app/spark_carry/nodes/s_carry_object_cv3.py.bak_20261113</code>.</p>
-
-<h3>7.2 Stability check patch</h3>
-<p>The demo required the centroid to move no more than 2 px for 20 consecutive frames, which
-never happened with the real camera (1-4 px jitter per frame). Patched to:</p>
-<pre>if found_count &gt;= 10:
-if abs(xc - xc_prev) &lt;= 6 and abs(yc - yc_prev) &lt;= 6:</pre>
-
-<h3>7.3 Live detector</h3>
+<h2>2. Any script terminal</h2>
 <pre>source ~/spark_noetic/devel/setup.bash
-python3 ~/codes/blue_detect.py</pre>
-<p>Example output:</p>
-<pre>BLUE area=14793 center=(415,310)
-BLUE area=15266 center=(415,312)</pre>
+python3 ~/codes/&lt;code&gt;.py</pre>
+<p>Replace <code>&lt;code&gt;</code> with the script name. Open as many script terminals as needed;
+they all connect to the same ROS master.</p>
 
-<h3>7.4 Snapshot for debugging</h3>
-<pre>python3 ~/codes/blue_snap.py /tmp/blue.png /tmp/blue_mask.png
-# from your PC:
-scp spark@10.25.141.8:/tmp/blue.png spark@10.25.141.8:/tmp/blue_mask.png .</pre>
+<div class="note">
+<p><strong>Keep the server terminal open.</strong> Closing it stops the master and all drivers.
+To keep it running after the terminal closes:</p>
+<pre>setsid nohup roslaunch ~/codes/server.launch &gt; ~/server.log 2&gt;&amp;1 &lt; /dev/null &amp;</pre>
+<p>Stop it with <code>pkill -f "roslaunch.*server.launch"</code>.</p>
+</div>
 
-<h3>7.5 Detect and touch</h3>
-<p>Detects the box, converts the pixel centre through <code>thefile.txt</code>, moves to
-<code>z=20</code>, then <code>z=-50</code>, then home.</p>
-<pre>python3 ~/codes/touch_blue.py
-python3 ~/codes/touch_blue.py --dry-run   # print coordinates, do not move</pre>
-
-<h3>7.6 Detection-pipeline debug</h3>
-<pre>python3 ~/codes/detect_pipeline_debug.py</pre>
-<p>Prints per-frame contour area, centroid and stability count. Use it when the grasp demo
-keeps printing <code>not found</code>.</p>
-
-<h2>8. Grasp demo (visual pick)</h2>
-<h3>8.1 Start via one-key menu</h3>
-<pre>cd ~/spark_noetic
-./onekey.sh        # 9 -> 2 (uArm) -> 1 (fixed position) -> Enter</pre>
-<p>Put a blue object in front of the robot. The launch opens RViz and a helper terminal.
-Press any key in the helper to start, which calls:</p>
-<pre>rosservice call /s_carry_object "type: 1"</pre>
-
-<h3>8.2 Start directly (survives SSH drops)</h3>
-<pre>cd ~/spark_noetic
-source devel/setup.bash
-export DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority
-setsid nohup roslaunch spark_carry_object spark_carry_object_only_cv3.launch \
-  camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6 &gt; ~/grasp.log 2&gt;&amp;1 &lt; /dev/null &amp;
-
-# trigger the grasp
-rosservice call /s_carry_object "type: 1"</pre>
-
-<h3>8.3 Expected state machine</h3>
-<pre>GRASP_OBJECT -> NAV_TO_WAYPOINT -> RELEASE_OBJECT</pre>
-<p>To stop the demo:</p>
-<pre>pkill -INT -f "roslaunch spark_carry_object spark_carry_object_only_cv3"</pre>
-
-<h2>9. HarmonyOS competition / star board (Spark-H)</h2>
-<h3>9.1 Driver commands</h3>
-<pre>source ~/spark_noetic/devel/setup.bash
-source ~/UBUNTU20_0/devel/setup.bash
-export ROS_PACKAGE_PATH=$HOME/UBUNTU20_0/src:$ROS_PACKAGE_PATH
-
-# manual match:  roslaunch spark_hm_pi_manual hm_spark.launch
-# task match:    roslaunch spark_hm_pi hm_spark.launch</pre>
-<p>For the full task program, <code>roslaunch spark_hm_task_match run.launch</code> already
-includes <code>hm_spark.launch</code> - do not start it twice. The task starts when
-<code>hm_task_match_start</code> (String) is published.</p>
-
-<h3>9.2 Star board (星火派) connection</h3>
-<ul>
-<li>Serial device: <code>/dev/SPARK-HM-PI</code> (115200 baud); base: <code>/dev/sparkBase</code>.</li>
-<li>Network config: <code>/home/spark/wifi_info.txt</code> is sent to the board over serial when the driver runs.</li>
-<li>Current config: SSID <code>OpenHarmony_2</code>, board IP <code>192.168.124.121</code>, gateway <code>192.168.124.1</code>.</li>
-<li>Press <strong>Reset</strong> on the board after starting the driver. Dot-matrix display: yellow cross = waiting for network, red check = connected.</li>
-<li>The phone must be on the same network; in the app enter <code>192.168.124.121</code> and the app's port.</li>
-</ul>
-<p><strong>Note:</strong> The HarmonyOS phone app is not included in the documentation pack. The project is a DevEco Studio application (bundle <code>com.example.carcontrol1</code>); ask the organizer for the "鸿蒙比赛APP" project or a signed HAP. The app project contains pages <code>tcpTest</code>, <code>autoPage</code>, <code>index</code> and <code>autoMatch</code>.</p>
-
-<h2>10. Troubleshooting</h2>
-<table width="100%" border="1" cellspacing="0" cellpadding="4">
-<tr><th width="26%">Symptom</th><th width="24%">Cause</th><th width="50%">Fix</th></tr>
-<tr><td>No OpenCV/RViz windows</td><td>DISPLAY not set in the SSH shell</td><td><code>export DISPLAY=:0; export XAUTHORITY=$HOME/.Xauthority</code> before launching</td></tr>
-<tr><td>[错误] 机械臂没有正确连接或未上电</td><td>Arm off / USB unplugged</td><td>Power arm, reseat USB to dock, check <code>lsusb</code> for <code>2341:0042</code></td></tr>
-<tr><td>map_server could not open test_map.yaml</td><td>No map built</td><td>Ignore for fixed-position grasp; build a map (onekey option 4) before navigation</td></tr>
-<tr><td>Grasp prints "not found" forever</td><td>Colour threshold or unstable centroid</td><td>Use patched HSV values; run <code>detect_pipeline_debug.py</code></td></tr>
-<tr><td>ERROR: Unable to communicate with master</td><td>No ROS master</td><td>Start the driver/launch first; roslaunch starts the master</td></tr>
-<tr><td>SSH freezes / robot unreachable</td><td>Wi-Fi dropped or IP changed</td><td>Wait/reconnect; get new IP with <code>hostname -I</code>; prefer a dedicated hotspot</td></tr>
-<tr><td>Star board unreachable</td><td>Robot and board on different networks</td><td>Match <code>wifi_info.txt</code> to the real hotspot (SSID/IP/gateway)</td></tr>
-<tr><td>Joint1 not found in URDF warning</td><td>URDF naming mismatch</td><td>Benign; ignore</td></tr>
-<tr><td><code>rostopic pub</code> takes 3 s</td><td>Normal: <code>-1</code> waits before exiting</td><td>No action</td></tr>
-</table>
-
-<h2>11. Scripts folder</h2>
-<p>Files in this folder:</p>
-<table width="100%" border="1" cellspacing="0" cellpadding="4">
-<tr><th width="32%">File</th><th width="68%">Purpose</th></tr>
-<tr><td><code>blue_detect.py</code></td><td>Live blue-box detection; prints area and centroid</td></tr>
-<tr><td><code>blue_snap.py</code></td><td>Save one frame and its blue mask to PNG</td></tr>
-<tr><td><code>touch_blue.py</code></td><td>Detect the box, convert through the calibration, touch it, go home</td></tr>
-<tr><td><code>arm_move.py</code></td><td>Move the arm to an absolute x/y/z pose or home</td></tr>
-<tr><td><code>detect_pipeline_debug.py</code></td><td>Frame-by-frame debug of the grasp detector</td></tr>
-</table>
-
-<h3>11.1 Copy the scripts to the robot</h3>
-<pre>scp -r "/home/mav/Documents/Extra/ROS Comp/codes" spark@10.25.141.8:/home/spark/codes
-ssh spark@10.25.141.8 "chmod +x /home/spark/codes/*.py"</pre>
-
-<h3>11.2 Run them</h3>
-<pre>ssh spark@10.25.141.8
+<h2>3. Minimal alternative (no server.launch)</h2>
+<pre># Terminal 1 - ROS master
 source ~/spark_noetic/devel/setup.bash
-python3 ~/codes/blue_detect.py</pre>
-<p>All scripts assume the camera driver (<code>spark_bringup</code>) is running. The touch and
-move scripts also need the arm driver (<code>swiftpro</code>).</p>
+roscore
 
-<h2>12. Changes made on the robot (2026-11-13)</h2>
-<ul>
-<li>Recalibrated arm + camera; wrote new parameters to <code>~/thefile.txt</code> at 21:30.</li>
-<li>Patched <code>s_carry_object_cv3.py</code>:
-  <ul>
-  <li>blue HSV thresholds: <code>[100,90,80]/[130,255,255]</code> &rarr; <code>[90,50,50]/[135,255,255]</code></li>
-  <li>stability: 20 frames / 2 px &rarr; 10 frames / 6 px</li>
-  <li>backup: <code>s_carry_object_cv3.py.bak_20261113</code></li>
-  </ul>
-</li>
-<li>No changes to <code>wifi_info.txt</code>, the HarmonyOS workspaces or system configuration.</li>
-</ul>
+# Terminal 2 - base driver
+source ~/spark_noetic/devel/setup.bash
+rosrun spark_base spark_base_node /dev/sparkBase __name:=spark_base_server
 
-<h2>13. Safety</h2>
-<ul>
-<li>The arm moves immediately when a pose is published; keep hands, cables and the field clear.</li>
-<li>Keep the emergency stop within reach; it must be released for the base/arm to move.</li>
-<li>Charge the robot before long runs; a low battery can shut the NUC down mid-run and drop the SSH session.</li>
-<li>Do not run two launches that both start the camera or the arm (duplicate drivers cause conflicts).</li>
-<li>The competition programs must not be modified beyond the allowed software scope; keep the backups above.</li>
-</ul>
+# Terminal 3 - arm driver
+source ~/spark_noetic/devel/setup.bash
+rosrun swiftpro swiftpro_write_node
+
+# Terminal 4 - any script
+source ~/spark_noetic/devel/setup.bash
+python3 ~/codes/&lt;code&gt;.py</pre>
+
+<h2>4. Camera / full setup</h2>
+<p>If a script needs the camera or lidar, use these launches instead of <code>server.launch</code>:</p>
+<pre># Terminal 1
+source ~/spark_noetic/devel/setup.bash
+roslaunch spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6
+
+# Terminal 2
+source ~/spark_noetic/devel/setup.bash
+roslaunch swiftpro pro_control_nomoveit.launch
+
+# Terminal 3
+source ~/spark_noetic/devel/setup.bash
+python3 ~/codes/&lt;code&gt;.py</pre>
+
+<h2>5. Before you run anything</h2>
+<pre>ls -l /dev/sparkBase      # base serial
+ls -l /dev/ttyACM*        # arm serial (expect /dev/ttyACM0)</pre>
+<p>If the arm device is missing, reconnect or power it. Without <code>/dev/ttyACM0</code> the arm
+driver reports <code>Unable to open port</code>.</p>
+
+<h2>6. Verify</h2>
+<pre>rosnode list
+rostopic hz /SwiftproState_topic      # arm: expect about 20 Hz
+rostopic info /cmd_vel                # base: expect a subscriber</pre>
+<p>If you see <code>Unable to register with master</code>, the server terminal is not running.</p>
 
 </body>
 </html>
