@@ -1,145 +1,132 @@
-# 📦 Пакет обновления проекта: Автономный робот NXROBO Spark
+# 📦 Project Update Package: NXROBO Spark Autonomous Robot
 
-> **GitHub репозиторий проекта:** [https://github.com/Mavprime/NXROBO](https://github.com/Mavprime/NXROBO)  
-> **Статус:** Фазы 0 и 1 завершены на 100%. Код верифицирован на физическом роботе.
-
-Данная папка (`Commit/`) содержит полностью верифицированный и готовый к сдаче в репозиторий комплект файлов.  
-Все скрипты протестированы на реальном роботе Spark (Ubuntu 20.04 LTS + ROS Noetic) и на стороне оператора (Windows 10/11).
+> **Repository:** [https://github.com/Mavprime/NXROBO](https://github.com/Mavprime/NXROBO)  
+> **Target Platform:** NXROBO Spark (Ubuntu 20.04 LTS + ROS Noetic)  
+> **Status:** Phase 0 & Phase 1 are 100% complete and physically verified on hardware. Ready for Arena Mapping (Phase 2) and full autonomous FSM match runs (Phase 3).
 
 ---
 
-## 📂 Структура папки
+## 📖 Overview & Competition Rules
+
+This package contains the fully tested code, automation launchers, and architectural documentation for the **10-minute autonomous competition category** («Полный автоном» / 自动任务赛 / "Treasure Hunt").
+
+### Key Competition Constraints:
+* **Match Duration:** 10 minutes total autonomous run (no manual intervention allowed).
+* **Target Items (10 cubes total):**
+  * **1 × Cake** (located on the 2nd tier in the center) $\to$ **MUST BE DELIVERED FIRST to Zone A**. Delivering any other cube first disqualifies the Cake score.
+  * **3 × Teddy Bear, 3 × Clock, 3 × Banana** (1st ground tier) $\to$ delivered to Zones B, C, D based on the dynamic classification board.
+* **Scoring Matrix:**
+  * Red Corner Target (0.45 × 0.45 m): Tier 1 = 2 pts, Tier 2 = 4 pts, Tier 3 = 7 pts (Formula: $N + 2^{N-1}$).
+  * Standard Drop Area: Tier 1 = 1 pt, Tier 2 = 2 pts, Tier 3 = 4 pts.
+  * Base departure: +1 pt.
+
+---
+
+## 📂 Folder Structure
 
 ```text
 Commit/
-├── codes/              # Программный код, исполняемый на бортовом компьютере робота
-│   ├── runtask.py          # Основной FSM соревнований (Торт первым, Temporal Voting, IK)
-│   ├── arm_ik.py           # Геометрическая кинематика руки uArm Swift Pro
-│   ├── keypatched2v.py     # Плавное телеуправление (WASD) с авто-sourcing ROS
-│   ├── dashboard.sh        # Интерактивный терминальный пульт оператора (меню 1-7)
-│   ├── start_system.sh     # Фоновый запуск подсистем ROS с небуферизованным логом
-│   ├── stop_system.sh      # Мягкая и аварийная остановка всех процессов
-│   ├── camera_stream.py    # HTTP MJPEG веб-трансляция камеры на порту 8080
-│   └── detect_ros.py       # YOLO-детекция кубиков и публикация в /objects
+├── codes/              # Production code deployed to the robot's onboard computer
+│   ├── runtask.py          # Core competition FSM (Cake-first rule, Temporal Voting, IK filter)
+│   ├── arm_ik.py           # Geometric kinematics solver for uArm Swift Pro
+│   ├── keypatched2v.py     # Smooth keyboard teleop (WASD) with automatic ROS sys.path bootstrapping
+│   ├── dashboard.sh        # Single-window interactive terminal dashboard (options 1-7)
+│   ├── start_system.sh     # Background multi-launch startup with unbuffered logging (python3 -u)
+│   ├── stop_system.sh      # Clean process shutdown & emergency pump/motor reset
+│   ├── camera_stream.py    # Lightweight HTTP MJPEG video stream on port 8080
+│   └── detect_ros.py       # Real-time YOLO object detection node publishing to /objects
 │
-├── launchers/          # Скрипты для ПК оператора (Windows)
-│   ├── START_ROBOT.bat     # Запуск робота в 1 клик с рабочего стола
-│   ├── upload.ps1          # Автоматическая синхронизация кода с роботом (SCP)
-│   ├── connect.ps1         # Быстрое подключение по SSH
-│   └── .gitignore          # Защита от коммита SSH-ключей, бинарников и кэшей
+├── launchers/          # Operator deployment tools for Windows workstation
+│   ├── START_ROBOT.bat     # 1-click desktop launcher connecting to robot's interactive dashboard
+│   ├── upload.ps1          # Automated code synchronization via SCP
+│   ├── connect.ps1         # Quick SSH terminal launcher
+│   └── .gitignore          # Repository hygiene (excludes SSH keys, large binaries, logs)
 │
-└── docs/               # Техническая и соревновательная документация
-    ├── PLAN.md             # Генеральный план проекта, регламент, фазы 0-5, реестр проблем
-    ├── CONTEX.md           # Handoff-документ контекста разработки и архитектуры
-    └── robot_startup.md    # Чек-лист и инструкция для пилота на день соревнований
+└── docs/               # Technical manuals and match runbooks
+    ├── PLAN.md             # Master project plan, phase tracking (0-5), and side issue register
+    ├── CONTEX.md           # Engineering handoff: credentials, topics, calibration parameters
+    └── robot_startup.md    # Pre-match operator checklist and step-by-step procedures
 ```
 
 ---
 
-## 📝 Подробное описание файлов
+## 🛠️ Detailed Component Descriptions
 
-### 1. Бортовые скрипты робота (`codes/`)
+### 1. Onboard Robot Scripts (`codes/`)
 
 * **`runtask.py`**  
-  * **Назначение:** Главный управляющий узел соревнований (Finite State Machine).
-  * **Что сделано:**
-    * Реализовано обязательное регламентное правило: **Торт со 2-го яруса ($Z = 45$ мм) сдаётся в Зону A первым** (при `total_drop_times == 0`).
-    * Внедрён алгоритм **Temporal Voting** (накопление 10 кадров и выбор самого стабильного класса через мажоритарное голосование) для устранения мерцания меток.
-    * Добавлена **пространственная кластеризация рамок (радиус 45 px)** и усреднение координат $(X, Y)$ — рука наводится точно в центр кубика без дрожания.
-    * Интегрирована функция **`norm_id()`** для нормализации алиасов меток соревнований (`1` — Мишка, `2/10/20` — Торт, `3/30` — Часы, `40` — Банан).
-    * Интегрирована проверка досягаемости **`ik_reachable()`** — робот выбирает ближайший кубик, гарантированно попадающий в рабочую зону манипулятора.
-  * **Куда монтируется на роботе:**  
-    `/home/spark/codes/runtask.py` и `/home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/runtask.py`.
+  * **Role:** Master Finite State Machine (FSM) controlling perception, manipulation, and navigation.
+  * **Key Features:**
+    * **Cake-First Priority:** Enforces mandatory delivery of the 2nd-tier Cake ($Z = 45$ mm) to Zone A at `total_drop_times == 0`.
+    * **Temporal Voting:** Buffers 10 consecutive camera frames to compute majority vote, eliminating label flickering.
+    * **Spatial Bounding-Box Clustering:** Groups detections within 45 px and averages coordinates to eliminate arm positioning jitter.
+    * **Class Alias Normalizer (`norm_id()`):** Resolves aliased competition IDs (`1` $\to$ Bear, `2/10/20` $\to$ Cake, `3/30` $\to$ Clock, `40` $\to$ Banana).
+    * **Inverse Kinematics Reachability Filter (`ik_reachable`):** Evaluates physical reachability of all detected cubes and picks the closest achievable candidate.
+    * **Calibrated Gripping Heights:** Calibrated against physical robot files: $Z = -55$ mm (1st floor, `thefile.txt`) and $Z = 45$ mm (2nd floor Cake, `thefile2.txt`).
+    * **Camera-Clear Tuck Pose:** Retracts arm to $(50, 180, 160)$ after drop to keep camera and LiDAR FOV completely unobstructed.
+  * **Deployment Target:** `/home/spark/codes/runtask.py` and ROS package path.
 
 * **`arm_ik.py`**  
-  * **Назначение:** Модуль прямой и обратной геометрической кинематики для манипулятора uArm Swift Pro.
-  * **Что сделано:** Вычисляет углы сервоприводов по заданным $(X, Y, Z)$, проверяет физические ограничения и предотвращает попытки движения руки в недостижимые координаты.
-  * **Куда монтируется на роботе:** `/home/spark/codes/arm_ik.py`.
+  * **Role:** Analytical Forward & Inverse Kinematics solver for the uArm Swift Pro 4-DOF robotic arm.
+  * **Key Features:** Validates coordinates $(X, Y, Z)$ against physical joint limits and prevents arm stall or singular configurations.
+  * **Deployment Target:** `/home/spark/codes/arm_ik.py`.
 
 * **`keypatched2v.py`**  
-  * **Назначение:** Скрипт плавного телеуправления роботом с клавиатуры.
-  * **Что сделано:** 
-    * Плавный разгон и торможение (устраняет проскальзывание колес).
-    * Поддержка безопасных скоростных профилей.
-    * Встроенный механизм **авто-бутстрапа путей ROS (`sys.path`)**: скрипт можно запускать напрямую в любой консоли `python3 keypatched2v.py` без предварительного вызова `source .../setup.bash`.
-  * **Куда монтируется на роботе:** `/home/spark/codes/keypatched2v.py`.
+  * **Role:** Smooth manual keyboard teleoperation node.
+  * **Key Features:** Smooth acceleration/deceleration profiles to prevent wheel slippage. Includes a self-bootstrapping `sys.path` injection that resolves ROS Python packages automatically without requiring `source /opt/ros/noetic/setup.bash` first.
+  * **Deployment Target:** `/home/spark/codes/keypatched2v.py`.
 
 * **`dashboard.sh`**  
-  * **Назначение:** Единый терминальный дашборд оператора (Linux/Bash).
-  * **Что сделано:** 
-    * Предоставляет цифровое меню: `1` — Старт систем, `2` — Тест захвата, `3` — Тест отпускания, `4` — Телеоп с автопоиском скрипта, `5` — Просмотр лога, `6` — Стоп, `7` — Выход.
-    * Защищен от аварийного падения при нажатии `Ctrl+C`.
-    * Вызывает `less +F` для просмотра живого лога в реальном времени.
-  * **Куда монтируется на роботе:** `/home/spark/codes/dashboard.sh`.
+  * **Role:** Unified interactive command center for the operator.
+  * **Key Features:** Provides numbered menu (1–7: Start stack, Test grasp, Test release, Teleop, Live logs, Stop, Exit). Shielded against accidental exit on `Ctrl+C` and uses `less +F` for real-time unbuffered log monitoring.
+  * **Deployment Target:** `/home/spark/codes/dashboard.sh`.
 
-* **`start_system.sh`**  
-  * **Назначение:** Фоновый запуск стека ROS для автономного режима.
-  * **Что сделано:** Запускает `driver_bringup.launch`, `pro_control_nomoveit.launch` и `auto_match.launch` с флагом небуферизованного вывода `python3 -u`, перенаправляя потоки в `/home/spark/spark_log/`.
-  * **Куда монтируется на роботе:** `/home/spark/codes/start_system.sh`.
-
-* **`stop_system.sh`**  
-  * **Назначение:** Безопасная аварийная остановка всех процессов робота.
-  * **Что сделано:** Корректно завершает ноды ROS, останавливает вращение колес и выключает вакуумную помпу.
-  * **Куда монтируется на роботе:** `/home/spark/codes/stop_system.sh`.
+* **`start_system.sh` & `stop_system.sh`**  
+  * **Role:** Lifecycle orchestration scripts.
+  * **Key Features:** Spawns `driver_bringup.launch`, `pro_control_nomoveit.launch`, and `auto_match.launch` in the background with unbuffered logging (`python3 -u`). Stop script kills active ROS nodes and cuts power to the suction pump.
+  * **Deployment Target:** `/home/spark/codes/`.
 
 * **`camera_stream.py`**  
-  * **Назначение:** Легковесный MJPEG-стример потока с камеры RealSense D435 на порт 8080.
-  * **Что сделано:** Позволяет оператору контролировать зрение робота через обычный веб-браузер (`http://<IP>:8080/`) без необходимости поднимать тяжелые X11/GUI сессии.
-  * **Куда монтируется на роботе:** `/home/spark/codes/camera_stream.py`.
-
-* **`detect_ros.py`**  
-  * **Назначение:** Узел нейросетевой детекции объектов (YOLO) в ROS Noetic.
-  * **Куда монтируется на роботе:** `/home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/detect_ros.py`.
+  * **Role:** Standalone HTTP MJPEG video streamer.
+  * **Key Features:** Streams RealSense D435 color feed over HTTP on port 8080 (`http://<robot_ip>:8080/`), allowing visual inspection via browser without heavy X11 GUI forwarding.
+  * **Deployment Target:** `/home/spark/codes/camera_stream.py`.
 
 ---
 
-### 2. Скрипты оператора (`launchers/`)
+### 2. Operator Workstation Launchers (`launchers/`)
 
 * **`START_ROBOT.bat`**  
-  * **Назначение:** Главный лаунчер запуска в 1 клик для Windows.
-  * **Что сделано:** Считывает IP робота из `robot_ip.txt` (с возможностью мгновенного ввода нового) и подключает оператора к `dashboard.sh` через нативный OpenSSH Windows без сторонних программ вроде MobaXterm.
-  * **Где размещается:** В корне рабочей папки на ПК оператора (`D:\ROS competition\`).
-
+  * 1-click Windows batch launcher. Reads target IP from `robot_ip.txt` and establishes a pseudo-terminal SSH connection directly into `dashboard.sh`.
 * **`upload.ps1`**  
-  * **Назначение:** Скрипт автоматического деплоя.
-  * **Что сделано:** В один вызов копирует все обновленные скрипты из папки `codes` на робота по текущему IP через SCP.
-  * **Где размещается:** В корне рабочей папки на ПК оператора (`D:\ROS competition\`).
-
+  * PowerShell deployment script. Synchronizes all modified scripts from the PC to the robot via SCP and applies execution permissions (`chmod +x`).
 * **`connect.ps1`**  
-  * **Назначение:** Консольный помощник быстрого входа по SSH на робота.
-  * **Где размещается:** В корне рабочей папки на ПК оператора (`D:\ROS competition\`).
-
+  * Fast interactive SSH wrapper for terminal debugging.
 * **`.gitignore`**  
-  * **Назначение:** Конфигурация игнорирования Git.
-  * **Что делает:** Предотвращает случайную публикацию закрытых SSH-ключей (`.ssh_key`), локального файла с IP (`robot_ip.txt`), дистрибутивов MobaXterm и временных кэшей.
-  * **Где размещается:** В корне Git-репозитория.
+  * Protects private SSH credentials (`.ssh_key`), local IP configs (`robot_ip.txt`), and large diagnostic archives from entering version control.
 
 ---
 
-### 3. Документация (`docs/`)
+## 🚀 Quick Start Guide
 
-* **`PLAN.md`**  
-  * Полный стратегический план соревнований. Содержит точные формулы начисления очков, правила 10 кубиков, тайминги, статус прохождения фаз 0–5 и детальный реестр решенных и открытых проблем (SI-1 .. SI-16).
+### 1. Deploying to Hardware
+From the Windows host PC in PowerShell:
+```powershell
+.\upload.ps1
+```
 
-* **`CONTEX.md`**  
-  * Паспорт проекта для быстрой передачи контекста новому разработчику или ИИ-ассистенту. Описывает сетевой доступ, пароли, калибровки, топики и архитектуру связи между узлами.
+### 2. Launching Operator Dashboard
+Double-click **`START_ROBOT.bat`** on your Windows desktop:
+* Press **`1`** to initialize all robot hardware (mobile base, LiDAR, RealSense, uArm).
+* Press **`2`** / **`3`** to verify physical cube grasp and release.
+* Press **`4`** for smooth keyboard driving (`WASD`).
+* Press **`5`** to monitor live mission logs.
 
-* **`robot_startup.md`**  
-  * Чек-лист предстартовой подготовки на соревновательный день: пошаговая инструкция от включения питания до финального старта.
-
----
-
-## 🚀 Готовое описание для Git Commit
-
-```text
-feat: complete robot bringup, cake-first autonomous logic and 1-click dashboard
-
-- Implement strict competition cake-first delivery logic in runtask.py (Z=45mm)
-- Add 10-frame temporal voting and spatial clustering to prevent detection jitter
-- Integrate uArm Swift Pro geometric inverse kinematics (arm_ik.py)
-- Create unified single-terminal operator dashboard (dashboard.sh)
-- Add 1-click Windows desktop launcher (START_ROBOT.bat) and auto-deploy script (upload.ps1)
-- Add auto-sourcing of ROS paths in keypatched2v.py for standalone execution
-- Add browser-based camera MJPEG stream utility (camera_stream.py)
-- Provide comprehensive documentation: PLAN.md, CONTEX.md, robot_startup.md
+### 3. Starting Autonomous Match
+Once the arena is mapped and the robot is placed in the starting zone:
+```bash
+rostopic pub /task_start_flag std_msgs/String "1"
+```
+Emergency abort:
+```bash
+rostopic pub /task_start_flag std_msgs/String "0"
 ```
