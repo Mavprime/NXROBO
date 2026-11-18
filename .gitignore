@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 ~$*
 .DS_Store
+.arm_last_pose

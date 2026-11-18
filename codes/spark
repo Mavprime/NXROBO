@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# spark - run a script from ~/codes, starting the server first if it isn't up.
+#
+#   ~/codes/spark key_fullbody.py       # server (if needed) + script
+#   ~/codes/spark --stop                # stop the server
+#   ~/codes/spark --status              # what is currently running
+#
+# The server is ~/codes/server.launch (base + arm drivers), started once in the
+# background; later runs reuse it. Log: ~/server.log
+# Camera/lidar scripts still need the full bringup - start it yourself once:
+#   roslaunch spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6
+# then ~/codes/spark <code>.py will just reuse that running master.
+
+set -u
+source "$HOME/spark_noetic/devel/setup.bash"
+LAUNCH=${SPARK_LAUNCH:-$HOME/codes/server.launch}
+LOG=$HOME/server.log
+
+master_up() { timeout 2 rosparam list >/dev/null 2>&1; }
+
+start_server() {
+  master_up && return 0
+  echo "[spark] starting $(basename "$LAUNCH") (log: $LOG)"
+  setsid nohup roslaunch "$LAUNCH" >"$LOG" 2>&1 </dev/null &
+  for _ in $(seq 1 60); do
+    master_up && { echo "[spark] server up"; return 0; }
+    sleep 0.5
+  done
+  echo "[spark] server did not come up; last lines of $LOG:" >&2
+  tail -n 20 "$LOG" >&2
+  return 1
+}
+
+case ${1:-} in
+  --stop)   pkill -f "roslaunch.*$(basename "$LAUNCH")"; echo "[spark] stop sent" ;;
+  --status) master_up && rosnode list || echo "[spark] server not running" ;;
+  ""|-h|--help) sed -n '2,14p' "$0" ;;
+  *)
+    start_server || exit 1
+    script=$1; shift
+    exec python3 "$HOME/codes/$script" "$@"
+    ;;
+esac
