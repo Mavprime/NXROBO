@@ -1,0 +1,28 @@
+<!--
+  Minimal Spark server for teleop/script work.
+
+  Starts:
+    - the ROS master (roslaunch starts it automatically)
+    - the base driver  (spark_base / spark_base_node)
+    - the arm driver   (swiftpro_write_node + swiftpro_rviz_node)
+
+  It does NOT start the camera or the lidar.
+
+  Usage:
+    Terminal 1 (keep this open):
+      source ~/spark_noetic/devel/setup.bash
+      roslaunch ~/codes/server.launch
+
+    Any other terminal:
+      source ~/spark_noetic/devel/setup.bash
+      python3 ~/codes/<your_script>.py
+
+  If a script needs the camera, add this include (or use
+  driver_bringup.launch with start_camera:=true instead):
+
+    <include file="$(find camera_driver_transfer)/launch/d435.launch"/>
+-->
+<launch>
+  <include file="$(find spark_base)/launch/spark_base.launch"/>
+  <include file="$(find swiftpro)/launch/pro_control_nomoveit.launch"/>
+</launch>

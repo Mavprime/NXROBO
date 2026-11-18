@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Spark Robot - Quick Commands</title>
+<style>
+  body { font-family: sans-serif; max-width: 900px; margin: 2em auto; line-height: 1.5; }
+  h1 { border-bottom: 2px solid #333; padding-bottom: .3em; }
+  h2 { margin-top: 1.6em; }
+  pre { background: #f2f2f2; padding: .8em; overflow-x: auto; }
+  code { background: #f2f2f2; padding: 0 .2em; }
+  .note { background: #fff8e1; padding: .7em; border-left: 4px solid #f0c000; }
+</style>
+</head>
+<body>
+
+<h1>Spark Robot - Quick Commands</h1>
+<p>Run these after every boot. <code>source</code> only loads the ROS environment; the server
+terminal starts the ROS master and the hardware drivers.</p>
+
+<h2>0. Copy your codes/ folder to the robot (from your PC)</h2>
+<pre>rsync -av "&lt;local-dir&gt;/" &lt;user&gt;@&lt;robot-ip&gt;:&lt;remote-dir&gt;/</pre>
+<p>Run this on your <strong>PC</strong>, not inside the robot's shell. Example for the usual layout
+(local repo &rarr; <code>~/codes</code> on the robot):</p>
+<pre>rsync -av "/home/mav/Documents/Extra/ROS Comp/codes/" spark@&lt;robot-ip&gt;:~/codes/</pre>
+<p>The trailing slash on the source copies the folder's <em>contents</em>; without it you get a
+nested <code>codes/codes</code>. The default SSH password on the Spark boards is
+<code>123456</code>.</p>
+<div class="note">
+<p>If <code>rsync</code> is not available, use <code>scp</code> instead:</p>
+<pre>scp -r "&lt;local-dir&gt;" &lt;user&gt;@&lt;robot-ip&gt;:&lt;remote-dir&gt;</pre>
+</div>
+
+<h2>1. Server terminal (keep it open)</h2>
+<pre>source ~/spark_noetic/devel/setup.bash
+roslaunch ~/codes/server.launch</pre>
+<p>Starts the ROS master, the base driver, and the arm driver. It does not start the camera or the
+lidar.</p>
+
+<h2>2. Any script terminal</h2>
+<pre>source ~/spark_noetic/devel/setup.bash
+python3 ~/codes/&lt;code&gt;.py</pre>
+<p>Replace <code>&lt;code&gt;</code> with the script name. Open as many script terminals as needed;
+they all connect to the same ROS master.</p>
+
+<div class="note">
+<p><strong>Keep the server terminal open.</strong> Closing it stops the master and all drivers.
+To keep it running after the terminal closes:</p>
+<pre>setsid nohup roslaunch ~/codes/server.launch &gt; ~/server.log 2&gt;&amp;1 &lt; /dev/null &amp;</pre>
+<p>Stop it with <code>pkill -f "roslaunch.*server.launch"</code>.</p>
+</div>
+
+<h2>3. Minimal alternative (no server.launch)</h2>
+<pre># Terminal 1 - ROS master
+source ~/spark_noetic/devel/setup.bash
+roscore
+
+# Terminal 2 - base driver
+source ~/spark_noetic/devel/setup.bash
+rosrun spark_base spark_base_node /dev/sparkBase __name:=spark_base_server
+
+# Terminal 3 - arm driver
+source ~/spark_noetic/devel/setup.bash
+rosrun swiftpro swiftpro_write_node
+
+# Terminal 4 - any script
+source ~/spark_noetic/devel/setup.bash
+python3 ~/codes/&lt;code&gt;.py</pre>
+
+<h2>4. Camera / full setup</h2>
+<p>If a script needs the camera or lidar, use these launches instead of <code>server.launch</code>:</p>
+<pre># Terminal 1
+source ~/spark_noetic/devel/setup.bash
+roslaunch spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6
+
+# Terminal 2
+source ~/spark_noetic/devel/setup.bash
+roslaunch swiftpro pro_control_nomoveit.launch
+
+# Terminal 3
+source ~/spark_noetic/devel/setup.bash
+python3 ~/codes/&lt;code&gt;.py</pre>
+
+<h2>5. Before you run anything</h2>
+<pre>ls -l /dev/sparkBase      # base serial
+ls -l /dev/ttyACM*        # arm serial (expect /dev/ttyACM0)</pre>
+<p>If the arm device is missing, reconnect or power it. Without <code>/dev/ttyACM0</code> the arm
+driver reports <code>Unable to open port</code>.</p>
+
+<h2>6. Verify</h2>
+<pre>rosnode list
+rostopic hz /SwiftproState_topic      # arm: expect about 20 Hz
+rostopic info /cmd_vel                # base: expect a subscriber</pre>
+<p>If you see <code>Unable to register with master</code>, the server terminal is not running.</p>
+
+</body>
+</html>

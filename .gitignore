@@ -22,6 +22,7 @@ MobaXterm/
 # Python caches
 __pycache__/
 *.py[cod]
+*.pyc
 *$py.class
 .pytest_cache/
 
@@ -36,3 +37,7 @@ __pycache__/
 Thumbs.db
 .DS_Store
 desktop.ini
+~$*
+
+# Robot state
+.arm_last_pose
