@@ -26,6 +26,16 @@ For a detection overlay, run ~/codes/blue_view.py on the robot screen instead
 """
 
 import os
+import sys
+
+# Auto-inject ROS Python paths if running in raw terminal without source
+for _p in [
+    '/opt/ros/noetic/lib/python3/dist-packages',
+    '/home/spark/spark_noetic/devel/lib/python3/dist-packages',
+]:
+    if os.path.exists(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
+
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -124,6 +134,7 @@ def main():
     rospy.Subscriber(IMAGE_TOPIC, Image, buffer.callback, queue_size=1)
 
     Handler.buffer = buffer
+    ThreadingHTTPServer.allow_reuse_address = True
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print("camera stream (%s): http://<robot-ip>:%d/  (snapshot: /snapshot.jpg)" % (IMAGE_TOPIC, PORT))
     try:

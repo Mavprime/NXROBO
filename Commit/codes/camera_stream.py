@@ -124,6 +124,7 @@ def main():
     rospy.Subscriber(IMAGE_TOPIC, Image, buffer.callback, queue_size=1)
 
     Handler.buffer = buffer
+    ThreadingHTTPServer.allow_reuse_address = True
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print("camera stream (%s): http://<robot-ip>:%d/  (snapshot: /snapshot.jpg)" % (IMAGE_TOPIC, PORT))
     try:

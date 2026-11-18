@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Остановка всех подсистем Spark
+# Stop all Spark subsystems
 
-echo "Остановка всех процессов..."
+echo "Stopping all processes..."
 fuser -k 8080/tcp 2>/dev/null
 pkill -f "runtask.py" 2>/dev/null
 pkill -f "detect_ros.py" 2>/dev/null
@@ -10,4 +10,4 @@ pkill -f "pro_control_nomoveit" 2>/dev/null
 pkill -f "spark_bringup" 2>/dev/null
 pkill -f "spark_base_server" 2>/dev/null
 rosnode kill -a 2>/dev/null
-echo "Все процессы остановлены."
+echo "All processes stopped."

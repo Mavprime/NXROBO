@@ -405,9 +405,9 @@ def main():
                     if new_state:
                         arm.x, arm.y, arm.z = ARM_PRESETS["v"][1]
                         arm.angle = ARM_PRESETS["v"][2]
-                        safe_print(">> MOTORS LOCKED (M17) - положение зафиксировано.")
+                        safe_print(">> MOTORS LOCKED (M17) - position locked.")
                     else:
-                        safe_print(">> MOTORS RELAXED (M2019) - выровняйте рукой ровно прямо, затем нажмите 'r'!")
+                        safe_print(">> MOTORS RELAXED (M2019) - align arm straight manually, then press 'r'!")
                 elif char == "0":                        # Release + Home
                     pump_on = False
                     set_pump(False)
