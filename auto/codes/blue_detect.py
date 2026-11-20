@@ -10,7 +10,7 @@ moving the arm.
 Run on the robot (camera driver must already be running):
 
     source ~/spark_noetic/devel/setup.bash
-    python3 ~/semi/blue_detect.py
+    python3 ~/codes/blue_detect.py
 
 Tune LOWER/UPPER if the box is not detected or other objects are.
 The values below are the patched defaults used for the light-blue cube.

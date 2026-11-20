@@ -65,14 +65,14 @@ joints keep moving.
 
 Prerequisites:
     arm: roslaunch swiftpro pro_control_nomoveit.launch
-         (or: roslaunch ~/semi/server.launch)
+         (or: roslaunch ~/codes/server.launch)
 
 Usage:
     ssh spark@10.25.141.8
     source ~/spark_noetic/devel/setup.bash
-    python3 ~/semi/arm.py
-    python3 ~/semi/arm.py --check-kinematics   # no ROS needed
-    python3 ~/semi/arm.py --status             # connections + pose, no motion
+    python3 ~/codes/arm.py
+    python3 ~/codes/arm.py --check-kinematics   # no ROS needed
+    python3 ~/codes/arm.py --status             # connections + pose, no motion
 
 Environment overrides:
     JOINT_STEP=10       degrees added per arm key press

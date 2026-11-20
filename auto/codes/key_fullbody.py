@@ -51,8 +51,8 @@ Usage
 -----
     ssh spark@10.25.141.8
     source ~/spark_noetic/devel/setup.bash
-    python3 ~/semi/key_fullbody.py
-    python3 ~/semi/key_fullbody.py --check-kinematics   # no ROS needed
+    python3 ~/codes/key_fullbody.py
+    python3 ~/codes/key_fullbody.py --check-kinematics   # no ROS needed
 
 Environment overrides
 ---------------------
