@@ -1,43 +1,113 @@
 #!/usr/bin/env bash
-# spark - run a script from ~/semi, starting the server first if it isn't up.
+# spark - run a script from ~/semi, bringing up only what it needs.
 #
-#   ~/semi/spark key_fullbody.py       # server (if needed) + script
-#   ~/semi/spark --stop                # stop the server
-#   ~/semi/spark --status              # what is currently running
+#   ~/semi/spark key_fullbody.py         # base + arm, then the script
+#   ~/semi/spark --camera touch_blue.py  # base + camera + lidar + arm, then the script
+#   ~/semi/spark --status                # what is running right now
+#   ~/semi/spark --stop                  # stop the stack this wrapper starts
 #
-# The server is ~/semi/server.launch (base + arm drivers), started once in the
-# background; later runs reuse it. Log: ~/server.log
-# Camera/lidar scripts still need the full bringup - start it yourself once:
-#   roslaunch spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6
-# then ~/semi/spark <code>.py will just reuse that running master.
+# The stack is started once, detached (setsid), and reused by later runs.
+# Log: ~/server.log
+#   default : ~/semi/server.launch             (base + uArm)
+#   --camera: driver_bringup.launch + uArm     (base + RealSense + lidar + uArm)
+#
+# Override the launch files if needed:
+#   SPARK_LAUNCH=...  SPARK_BRINGUP="pkg file.launch arg:=value"
 
 set -u
-source "$HOME/spark_noetic/devel/setup.bash"
+ROS_SETUP=$HOME/spark_noetic/devel/setup.bash
+if [ -r "$ROS_SETUP" ]; then
+  source "$ROS_SETUP"
+else
+  echo "[spark] warning: $ROS_SETUP not found (run this on the robot)" >&2
+fi
+
 LAUNCH=${SPARK_LAUNCH:-$HOME/semi/server.launch}
+BRINGUP=${SPARK_BRINGUP:-spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6}
 LOG=$HOME/server.log
 
-master_up() { timeout 2 rosparam list >/dev/null 2>&1; }
+CAMERA=0
+if [ "${1:-}" = "--camera" ]; then
+  CAMERA=1
+  shift
+fi
 
-start_server() {
-  master_up && return 0
-  echo "[spark] starting $(basename "$LAUNCH") (log: $LOG)"
-  setsid nohup roslaunch "$LAUNCH" >"$LOG" 2>&1 </dev/null &
-  for _ in $(seq 1 60); do
-    master_up && { echo "[spark] server up"; return 0; }
+master_up()  { timeout 2 rosparam list >/dev/null 2>&1; }
+node_up()    { rosnode list 2>/dev/null | grep -qx "$1"; }
+camera_up()  { timeout 2 rostopic list 2>/dev/null | grep -qx /camera/color/image_raw; }
+
+start_bg() { # start_bg <label> <command...>
+  local label=$1; shift
+  echo "[spark] starting $label (log: $LOG)"
+  setsid nohup "$@" >>"$LOG" 2>&1 </dev/null &
+}
+
+fail() {
+  echo "[spark] $1" >&2
+  echo "[spark] last lines of $LOG:" >&2
+  tail -n 20 "$LOG" >&2
+  exit 1
+}
+
+ensure_arm() {
+  node_up /swiftpro_write_node && return 0
+  start_bg "uArm driver" roslaunch swiftpro pro_control_nomoveit.launch
+  for _ in $(seq 1 40); do
+    node_up /swiftpro_write_node && { echo "[spark] uArm up"; return 0; }
     sleep 0.5
   done
-  echo "[spark] server did not come up; last lines of $LOG:" >&2
-  tail -n 20 "$LOG" >&2
-  return 1
+  fail "uArm driver did not come up"
+}
+
+start_stack() {
+  if master_up; then
+    if [ "$CAMERA" = 1 ] && ! camera_up; then
+      echo "[spark] the ROS master is up but the camera is not." >&2
+      echo "[spark] stop the current stack and rerun with --camera:" >&2
+      echo "        ~/semi/spark --stop && ~/semi/spark --camera <script>.py" >&2
+      exit 1
+    fi
+    ensure_arm
+    return 0
+  fi
+
+  if [ "$CAMERA" = 1 ]; then
+    # shellcheck disable=SC2086  # BRINGUP is intentionally word-split
+    start_bg "base + camera + lidar" roslaunch $BRINGUP
+  else
+    start_bg "$(basename "$LAUNCH")" roslaunch "$LAUNCH"
+  fi
+
+  for _ in $(seq 1 60); do master_up && break; sleep 0.5; done
+  master_up || fail "ROS master did not come up"
+
+  if [ "$CAMERA" = 1 ]; then
+    for _ in $(seq 1 40); do camera_up && break; sleep 0.5; done
+    camera_up || fail "camera topic /camera/color/image_raw never appeared"
+    ensure_arm
+  else
+    # server.launch already includes the uArm driver; give it time to register.
+    for _ in $(seq 1 40); do node_up /swiftpro_write_node && break; sleep 0.5; done
+  fi
 }
 
 case ${1:-} in
-  --stop)   pkill -f "roslaunch.*$(basename "$LAUNCH")"; echo "[spark] stop sent" ;;
-  --status) master_up && rosnode list || echo "[spark] server not running" ;;
-  ""|-h|--help) sed -n '2,14p' "$0" ;;
+  --stop)
+    pkill -f "roslaunch.*server\.launch" 2>/dev/null
+    pkill -f "roslaunch.*driver_bringup\.launch" 2>/dev/null
+    pkill -f "roslaunch.*pro_control_nomoveit\.launch" 2>/dev/null
+    echo "[spark] stop sent"
+    ;;
+  --status)
+    if master_up; then rosnode list; else echo "[spark] ROS master is not running"; fi
+    ;;
+  ""|-h|--help)
+    sed -n '2,15p' "$0"
+    ;;
   *)
-    start_server || exit 1
-    script=$1; shift
+    start_stack || exit 1
+    script=$1
+    shift
     exec python3 "$HOME/semi/$script" "$@"
     ;;
 esac
