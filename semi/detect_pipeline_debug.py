@@ -9,7 +9,7 @@ grasp demo keeps printing "not found".
 Run on the robot:
 
     source ~/spark_noetic/devel/setup.bash
-    python3 ~/codes/detect_pipeline_debug.py
+    python3 ~/semi/detect_pipeline_debug.py
 
 The grasp demo (s_carry_object_cv3.py) was patched to require 10 stable
 frames within 6 px. Original values were 20 frames / 2 px.

@@ -8,7 +8,7 @@ your PC and look at them.
 Run on the robot:
 
     source ~/spark_noetic/devel/setup.bash
-    python3 ~/codes/blue_snap.py
+    python3 ~/semi/blue_snap.py
 
 Then from your PC:
 

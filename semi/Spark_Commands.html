@@ -18,13 +18,13 @@
 <p>Run these after every boot. <code>source</code> only loads the ROS environment; the server
 terminal starts the ROS master and the hardware drivers.</p>
 
-<h2>0. Copy your codes/ folder to the robot (from your PC)</h2>
+<h2>0. Copy your semi/ folder to the robot (from your PC)</h2>
 <pre>rsync -av "&lt;local-dir&gt;/" &lt;user&gt;@&lt;robot-ip&gt;:&lt;remote-dir&gt;/</pre>
 <p>Run this on your <strong>PC</strong>, not inside the robot's shell. Example for the usual layout
-(local repo &rarr; <code>~/codes</code> on the robot):</p>
-<pre>rsync -av "/home/mav/Documents/Extra/ROS Comp/codes/" spark@&lt;robot-ip&gt;:~/codes/</pre>
+(local repo &rarr; <code>~/semi</code> on the robot):</p>
+<pre>rsync -av "/home/mav/Documents/Extra/ROS Comp/semi/" spark@&lt;robot-ip&gt;:~/semi/</pre>
 <p>The trailing slash on the source copies the folder's <em>contents</em>; without it you get a
-nested <code>codes/codes</code>. The default SSH password on the Spark boards is
+nested <code>semi/semi</code>. The default SSH password on the Spark boards is
 <code>123456</code>.</p>
 <div class="note">
 <p>If <code>rsync</code> is not available, use <code>scp</code> instead:</p>
@@ -33,20 +33,20 @@ nested <code>codes/codes</code>. The default SSH password on the Spark boards is
 
 <h2>1. Server terminal (keep it open)</h2>
 <pre>source ~/spark_noetic/devel/setup.bash
-roslaunch ~/codes/server.launch</pre>
+roslaunch ~/semi/server.launch</pre>
 <p>Starts the ROS master, the base driver, and the arm driver. It does not start the camera or the
 lidar.</p>
 
 <h2>2. Any script terminal</h2>
 <pre>source ~/spark_noetic/devel/setup.bash
-python3 ~/codes/&lt;code&gt;.py</pre>
+python3 ~/semi/&lt;code&gt;.py</pre>
 <p>Replace <code>&lt;code&gt;</code> with the script name. Open as many script terminals as needed;
 they all connect to the same ROS master.</p>
 
 <div class="note">
 <p><strong>Keep the server terminal open.</strong> Closing it stops the master and all drivers.
 To keep it running after the terminal closes:</p>
-<pre>setsid nohup roslaunch ~/codes/server.launch &gt; ~/server.log 2&gt;&amp;1 &lt; /dev/null &amp;</pre>
+<pre>setsid nohup roslaunch ~/semi/server.launch &gt; ~/server.log 2&gt;&amp;1 &lt; /dev/null &amp;</pre>
 <p>Stop it with <code>pkill -f "roslaunch.*server.launch"</code>.</p>
 </div>
 
@@ -65,7 +65,7 @@ rosrun swiftpro swiftpro_write_node
 
 # Terminal 4 - any script
 source ~/spark_noetic/devel/setup.bash
-python3 ~/codes/&lt;code&gt;.py</pre>
+python3 ~/semi/&lt;code&gt;.py</pre>
 
 <h2>4. Camera / full setup</h2>
 <p>If a script needs the camera or lidar, use these launches instead of <code>server.launch</code>:</p>
@@ -79,7 +79,7 @@ roslaunch swiftpro pro_control_nomoveit.launch
 
 # Terminal 3
 source ~/spark_noetic/devel/setup.bash
-python3 ~/codes/&lt;code&gt;.py</pre>
+python3 ~/semi/&lt;code&gt;.py</pre>
 
 <h2>5. Before you run anything</h2>
 <pre>ls -l /dev/sparkBase      # base serial

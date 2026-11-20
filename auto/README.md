@@ -25,7 +25,7 @@ This package contains the fully tested code, automation launchers, and architect
 ## 📂 Folder Structure
 
 ```text
-Commit/
+auto/
 ├── codes/              # Production code deployed to the robot's onboard computer
 │   ├── runtask.py          # Core competition FSM (Cake-first rule, Temporal Voting, IK filter)
 │   ├── arm_ik.py           # Geometric kinematics solver for uArm Swift Pro
@@ -64,32 +64,32 @@ Commit/
     * **Inverse Kinematics Reachability Filter (`ik_reachable`):** Evaluates physical reachability of all detected cubes and picks the closest achievable candidate.
     * **Calibrated Gripping Heights:** Calibrated against physical robot files: $Z = -55$ mm (1st floor, `thefile.txt`) and $Z = 45$ mm (2nd floor Cake, `thefile2.txt`).
     * **Camera-Clear Tuck Pose:** Retracts arm to $(50, 180, 160)$ after drop to keep camera and LiDAR FOV completely unobstructed.
-  * **Deployment Target:** `/home/spark/codes/runtask.py` and ROS package path.
+  * **Deployment Target:** `/home/spark/semi/runtask.py` and ROS package path.
 
 * **`arm_ik.py`**  
   * **Role:** Analytical Forward & Inverse Kinematics solver for the uArm Swift Pro 4-DOF robotic arm.
   * **Key Features:** Validates coordinates $(X, Y, Z)$ against physical joint limits and prevents arm stall or singular configurations.
-  * **Deployment Target:** `/home/spark/codes/arm_ik.py`.
+  * **Deployment Target:** `/home/spark/semi/arm_ik.py`.
 
 * **`keypatched2v.py`**  
   * **Role:** Smooth manual keyboard teleoperation node.
   * **Key Features:** Smooth acceleration/deceleration profiles to prevent wheel slippage. Includes a self-bootstrapping `sys.path` injection that resolves ROS Python packages automatically without requiring `source /opt/ros/noetic/setup.bash` first.
-  * **Deployment Target:** `/home/spark/codes/keypatched2v.py`.
+  * **Deployment Target:** `/home/spark/semi/keypatched2v.py`.
 
 * **`dashboard.sh`**  
   * **Role:** Unified interactive command center for the operator.
   * **Key Features:** Provides numbered menu (1–7: Start stack, Test grasp, Test release, Teleop, Live logs, Stop, Exit). Shielded against accidental exit on `Ctrl+C` and uses `less +F` for real-time unbuffered log monitoring.
-  * **Deployment Target:** `/home/spark/codes/dashboard.sh`.
+  * **Deployment Target:** `/home/spark/semi/dashboard.sh`.
 
 * **`start_system.sh` & `stop_system.sh`**  
   * **Role:** Lifecycle orchestration scripts.
   * **Key Features:** Spawns `driver_bringup.launch`, `pro_control_nomoveit.launch`, and `auto_match.launch` in the background with unbuffered logging (`python3 -u`). Stop script kills active ROS nodes and cuts power to the suction pump.
-  * **Deployment Target:** `/home/spark/codes/`.
+  * **Deployment Target:** `/home/spark/semi/`.
 
 * **`camera_stream.py`**  
   * **Role:** Standalone HTTP MJPEG video streamer.
   * **Key Features:** Streams RealSense D435 color feed over HTTP on port 8080 (`http://<robot_ip>:8080/`), allowing visual inspection via browser without heavy X11 GUI forwarding.
-  * **Deployment Target:** `/home/spark/codes/camera_stream.py`.
+  * **Deployment Target:** `/home/spark/semi/camera_stream.py`.
 
 ---
 

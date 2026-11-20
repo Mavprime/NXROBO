@@ -4,7 +4,7 @@
 **Robot:** Spark-H (NXROBO) — Ubuntu 20.04 LTS (ROS Noetic)  
 **Robot IP:** `10.24.170.0` (User: `spark`, Password: `simple2026`)  
 **Workspace Path (Local):** `D:\ROS competition\spark_humble_ws\codes\`  
-**Target Path (Robot):** `/home/spark/codes/`  
+**Target Path (Robot):** `/home/spark/semi/`  
 
 ---
 
@@ -125,5 +125,5 @@ uv run --with paramiko python "C:\Users\user1\.gemini\antigravity\brain\a6878179
 3. **Terminal 3 (Keyboard Teleoperation):**
    ```bash
    source ~/spark_noetic/devel/setup.bash
-   python3 ~/codes/keyboard_teleop.py
+   python3 ~/semi/keyboard_teleop.py
    ```

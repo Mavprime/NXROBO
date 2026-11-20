@@ -34,7 +34,7 @@ filesystem, so <code>~/codes</code> (= <code>/codes</code>) cannot be created. S
   <tr><th>#</th><th>Where</th><th>What</th></tr>
   <tr><td>1</td><td>robot</td><td>Power on, wait for Wi-Fi</td></tr>
   <tr><td>2</td><td>PC</td><td>Find the board's IP (DHCP - it changes)</td></tr>
-  <tr><td>3</td><td>PC</td><td>Upload <code>codes/</code> if they changed</td></tr>
+  <tr><td>3</td><td>PC</td><td>Upload <code>semi/</code> if they changed</td></tr>
   <tr><td>4</td><td>robot, terminal 1</td><td>Start the server (master + drivers)</td></tr>
   <tr><td>5</td><td>robot, terminal 2</td><td>Run the Python script</td></tr>
   <tr><td>6</td><td>robot</td><td>Verify / stop</td></tr>
@@ -55,7 +55,7 @@ usual <code>rsync ... root@ip:~/codes/</code> fails. Use hdc over USB.</p>
 every send fails with <code>[Fail]Error opening file: no such file or directory</code>:</p>
 <pre>~/bin/hdc shell 'mkdir -p /data/local/codes'</pre>
 <p>Then copy the files (from your PC):</p>
-<pre>cd "/home/mav/Documents/Extra/ROS Comp/codes"
+<pre>cd "/home/mav/Documents/Extra/ROS Comp/semi"
 for f in *.py *.launch spark; do ~/bin/hdc file send "$PWD/$f" "/data/local/codes/$f"; done</pre>
 <div class="note">
 <p><code>~/bin/hdc</code> is the Linux hdc from the OpenHarmony 5.0.0 SDK. It needs the udev rule

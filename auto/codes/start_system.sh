@@ -71,7 +71,7 @@ echo "[3/5] Starting camera web stream on port 8080..."
 pkill -f "codes/camera_stream\.py" 2>/dev/null
 fuser -k 8080/tcp 2>/dev/null
 sleep 1
-setsid nohup python3 -u ~/codes/camera_stream.py > ~/logs/stream.log 2>&1 < /dev/null &
+setsid nohup python3 -u ~/semi/camera_stream.py > ~/logs/stream.log 2>&1 < /dev/null &
 sleep 1
 
 # 4. Neural network detector

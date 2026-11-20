@@ -39,7 +39,7 @@ Prerequisites:
 Usage:
     ssh spark@10.24.170.0
     source ~/spark_noetic/devel/setup.bash
-    python3 ~/codes/keyboard_teleop.py
+    python3 ~/semi/keyboard_teleop.py
 """
 
 import os

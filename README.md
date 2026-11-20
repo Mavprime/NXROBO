@@ -65,17 +65,17 @@ Host PC (Windows 10/11)
       (SSH / SCP)
           ▼
 Robot onboard NUC (Ubuntu 20.04 LTS + ROS Noetic)
-  ├── codes/dashboard.sh     --> Unified operator interface (options 1–8)
-  ├── codes/start_system.sh  --> Idempotent background bringup of every subsystem
-  ├── codes/stop_system.sh   --> Safe shutdown, pump/motor reset
-  ├── codes/keypatched2v.py  --> Smooth keyboard teleoperation (self-bootstrapping ROS env)
-  ├── codes/camera_stream.py --> MJPEG web stream on port 8080
-  ├── codes/detect_ros.py    --> YOLO detector publishing /objects (Detection2DArray)
-  ├── codes/arm_ik.py        --> Analytical 4-DOF IK reachability check
-  ├── codes/runtask.py       --> Competition FSM (perception → grasp → navigate → drop)
-  ├── codes/test_all_systems.py --> Hardware/ROS diagnostics
-  ├── codes/view_log.py      --> Interactive log viewer
-  └── codes/tests/           --> Pure-Python unit tests for the mission logic
+  ├── semi/dashboard.sh      --> Unified operator interface (options 1–8)
+  ├── semi/start_system.sh   --> Idempotent background bringup of every subsystem
+  ├── semi/stop_system.sh    --> Safe shutdown, pump/motor reset
+  ├── semi/keypatched2v.py   --> Smooth keyboard teleoperation (self-bootstrapping ROS env)
+  ├── semi/camera_stream.py  --> MJPEG web stream on port 8080
+  ├── semi/detect_ros.py     --> YOLO detector publishing /objects (Detection2DArray)
+  ├── semi/arm_ik.py         --> Analytical 4-DOF IK reachability check
+  ├── semi/runtask.py        --> Competition FSM (perception → grasp → navigate → drop)
+  ├── semi/test_all_systems.py --> Hardware/ROS diagnostics
+  ├── semi/view_log.py       --> Interactive log viewer
+  └── semi/tests/            --> Pure-Python unit tests for the mission logic
 ```
 
 ---
@@ -194,7 +194,7 @@ If any subsystem is not running, it is started automatically in the background.
 .\upload.ps1
 ```
 
-Copies the current `codes/` to `~/codes/` on the robot and restarts the background
+Copies the current `codes/` to `~/semi/` on the robot and restarts the background
 `runtask.py`.
 
 ### 3. Start the competition mission
@@ -216,7 +216,7 @@ Open `http://<robot_ip>:8080/` in any browser — real-time MJPEG from the RealS
 ### Logic unit tests (no ROS required)
 
 ```bash
-cd ~/codes
+cd ~/semi
 python3 tests/run_all_tests.py        # on the robot
 # or, from any Python 3 host:
 python3 -m unittest discover -s tests -p "test_*.py"
@@ -237,7 +237,7 @@ python3 -m unittest discover -s tests -p "test_*.py"
 From the dashboard choose `7`, or on the robot:
 
 ```bash
-bash ~/codes/test_all_systems.sh
+bash ~/semi/test_all_systems.sh
 ```
 
 Checks: factory calibration files (`thefile.txt`, `thefile2.txt`), every required
@@ -264,8 +264,8 @@ python remote_spark_ops.py
 ├── PLAN.md                    # Roadmap, verified phases, issue register
 ├── CONTEX.md                  # Hardware parameters, topics, verified status
 ├── robot_startup.md           # Operator pre-match checklist
-├── codes/                     # Auxiliary/experimental robot scripts
-├── Commit/                    # Self-contained verified release bundle
+├── semi/                      # Semi-autonomous teleoperation and arm scripts
+├── auto/                      # Self-contained verified release bundle
 │   ├── codes/                 # Production code executed on the robot
 │   ├── launchers/             # Launchers shipped with the release
 │   └── README.md              # Deployment notes for the release

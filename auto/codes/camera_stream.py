@@ -14,14 +14,14 @@ Prerequisite: the camera driver must be running:
 
 Run:
     source ~/spark_noetic/devel/setup.bash
-    python3 ~/codes/camera_stream.py
+    python3 ~/semi/camera_stream.py
 
 Environment:
     PORT=8080        HTTP port
     QUALITY=80       JPEG quality
     FPS=30           maximum stream rate
 
-For a detection overlay, run ~/codes/blue_view.py on the robot screen instead
+For a detection overlay, run ~/semi/blue_view.py on the robot screen instead
 (or ask for an overlay option in this stream).
 """
 
@@ -38,6 +38,7 @@ from sensor_msgs.msg import Image
 PORT = int(os.environ.get("PORT", "8080"))
 QUALITY = int(os.environ.get("QUALITY", "80"))
 FPS = float(os.environ.get("FPS", "30"))
+IMAGE_TOPIC = os.environ.get("IMAGE_TOPIC", "/camera/color/image_raw")
 BOUNDARY = "sparkframe"
 
 PAGE = b"""<!DOCTYPE html>
@@ -120,11 +121,12 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     rospy.init_node("camera_stream", anonymous=True)
     buffer = FrameBuffer()
-    rospy.Subscriber("/camera/color/image_raw", Image, buffer.callback, queue_size=1)
+    rospy.Subscriber(IMAGE_TOPIC, Image, buffer.callback, queue_size=1)
 
     Handler.buffer = buffer
+    ThreadingHTTPServer.allow_reuse_address = True
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    print("camera stream: http://<robot-ip>:%d/  (snapshot: /snapshot.jpg)" % PORT)
+    print("camera stream (%s): http://<robot-ip>:%d/  (snapshot: /snapshot.jpg)" % (IMAGE_TOPIC, PORT))
     try:
         server.serve_forever()
     except KeyboardInterrupt:

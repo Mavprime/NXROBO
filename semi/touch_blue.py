@@ -19,15 +19,15 @@ Documented heights vary by object height:
     Spark-H HM task:     hover z = 120, touch z =  95   (cargo on a table)
 For a floor box the one-key demo uses 20 / -50, which is the default here.
 Override with environment variables if needed:
-    HOVER_Z=20 TOUCH_Z=-55 python3 ~/codes/touch_blue.py
+    HOVER_Z=20 TOUCH_Z=-55 python3 ~/semi/touch_blue.py
 
 Prerequisites:
     camera: roslaunch spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6
     arm:    roslaunch swiftpro pro_control_nomoveit.launch
 
 Usage:
-    python3 ~/codes/touch_blue.py            # move and touch
-    python3 ~/codes/touch_blue.py --dry-run  # print coordinates/reachability only
+    python3 ~/semi/touch_blue.py            # move and touch
+    python3 ~/semi/touch_blue.py --dry-run  # print coordinates/reachability only
 
 Keep hands clear: the arm moves directly to the computed point.
 """

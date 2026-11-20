@@ -20,8 +20,8 @@ Prerequisites:
     arm:    roslaunch swiftpro pro_control_nomoveit.launch
 
 Usage:
-    python3 ~/codes/pick_hold_release.py
-    python3 ~/codes/pick_hold_release.py --dry-run
+    python3 ~/semi/pick_hold_release.py
+    python3 ~/semi/pick_hold_release.py --dry-run
 
 Environment overrides (millimetres / seconds):
     HOVER_Z=20 TOUCH_Z=-50 LIFT_Z=120 HOLD_SECONDS=3

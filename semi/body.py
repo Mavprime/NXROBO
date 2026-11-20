@@ -13,12 +13,12 @@ alongside arm.py; both connect to the same ROS master.
 
 Prerequisites:
     base: roslaunch spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6
-          (or: roslaunch ~/codes/server.launch)
+          (or: roslaunch ~/semi/server.launch)
 
 Usage:
     ssh spark@10.25.141.8
     source ~/spark_noetic/devel/setup.bash
-    python3 ~/codes/body.py
+    python3 ~/semi/body.py
 
 Environment overrides:
     LIN_SPEED=0.15     m/s
@@ -60,7 +60,7 @@ def main():
         rospy.sleep(0.1)
     if cmd_pub.get_num_connections() == 0:
         print("WARNING: no subscriber on /cmd_vel.")
-        print("         Start the base driver or ~/codes/server.launch")
+        print("         Start the base driver or ~/semi/server.launch")
         print("         Keys will not move the robot until it is running.")
 
     def set_base(linear, angular):

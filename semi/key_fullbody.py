@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
-Arm-only keyboard teleop for the Spark-H uArm (base yaw, shoulder, elbow).
+Keyboard teleop for the Spark-H base + the 4-DOF uArm (base, shoulder, elbow).
 
-Arm keys (10 degrees per press, slew-limited so it moves smoothly):
+Base (hold for continuous motion - terminal key repeat):
+    w  forward          s  backward
+    a  turn left        d  turn right
+
+Arm (10 degrees per press, slew-limited so it moves smoothly):
     4  base rotate left          6  base rotate right
     7  raise upper arm           9  lower upper arm
     8  extend forearm            2  fold forearm
@@ -10,17 +14,14 @@ Arm keys (10 degrees per press, slew-limited so it moves smoothly):
 Other:
     Enter  toggle the vacuum pump: suck on the first press, release on the next
     0      release the pump and send the arm to its home pose
-    Ctrl+C stop everything (pump off)
-
-Run this in its own terminal alongside body.py; both connect to the same ROS
-master. body.py handles w/a/s/d for the mobile base.
+    Ctrl+C stop everything (base stopped, pump off)
 
 How the arm works
 -----------------
 The driver only accepts a Cartesian pose on /position_write_topic
-(swiftpro/position x,y,z in mm). There is no joint-angle topic. So this script
-keeps the three motor angles locally and converts them to x,y,z with the same
-forward kinematics as the robot's swiftpro_moveit_node.cpp:
+(swiftpro/position x,y,z in mm). There is no joint-angle topic. So this script keeps the three motor angles locally and
+converts them to x,y,z with the same forward kinematics as the robot's
+swiftpro_moveit_node.cpp:
 
     stretch = LOWER*cos(a1) + UPPER*cos(a2) + L2 + 56.55
     height  = LOWER*sin(a1) - UPPER*sin(a2) + L1
@@ -29,64 +30,50 @@ forward kinematics as the robot's swiftpro_moveit_node.cpp:
 where a0 = base yaw, a1 = shoulder, a2 = elbow, all in degrees. At the home
 pose (120, 0, 35) mm the inverse gives about (90, 103.4, 58.4) degrees.
 
-From home:
+The key signs were chosen so that from home:
     4/6 move the base counter-clockwise/clockwise (left/right),
     7 decreases a1 and raises the arm, 9 increases a1 and lowers it,
     8 decreases a2 and extends the forearm, 2 increases a2 and folds it.
 From a very different arm pose the visual direction can differ; press 0 to
 return to the known home pose.
 
-Arm state / first run
----------------------
-At power-on the arm motors are DETACHED: the driver accepts poses and reports
-them on /SwiftproState_topic, but nothing physically moves until the attach
-sequence runs (as in the M-Robots grasp code):
-
-    /swiftpro_status_topic:  0  -> M2019 (detach)   1 -> M17 (attach)
-
-This script sends that 0 -> 1 pair on startup and again whenever you press A.
-If the arm "accepts" keys but never moves, press A to re-attach.
-
-swiftpro publishes /SwiftproState_topic only after it receives a command -
-while the arm is idle the topic is silent. So the script saves its last
-commanded pose in .arm_last_pose (next to this file) and resumes from it on the
-next run. On a first run with no saved pose, arm keys stay disabled until you
-press 0 once; that homes the arm and creates the saved pose.
-
-    python3 arm.py --status     # show connections + starting pose, no motion
-
 Each press adds JOINT_STEP degrees to the target. The control loop moves the
 joint toward that target at JOINT_SPEED deg/s, so a 10 degree press takes about
 0.17 s at the default speed instead of jumping. Holding a key (terminal key
 repeat) keeps adding steps; letting go stops the arm after ARM_TIMEOUT.
 
-If a joint reaches a Cartesian/IK limit, only that joint stops; the other
-joints keep moving.
+Prerequisites
+-------------
+    base: roslaunch spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6
+    arm:  roslaunch swiftpro pro_control_nomoveit.launch
 
-Prerequisites:
-    arm: roslaunch swiftpro pro_control_nomoveit.launch
-         (or: roslaunch ~/codes/server.launch)
-
-Usage:
+Usage
+-----
     ssh spark@10.25.141.8
     source ~/spark_noetic/devel/setup.bash
-    python3 ~/codes/arm.py
-    python3 ~/codes/arm.py --check-kinematics   # no ROS needed
-    python3 ~/codes/arm.py --status             # connections + pose, no motion
+    python3 ~/semi/key_fullbody.py
+    python3 ~/semi/key_fullbody.py --check-kinematics   # no ROS needed
 
-Environment overrides:
+Environment overrides
+---------------------
+    LIN_SPEED=0.15      m/s
+    ANG_SPEED=0.6       rad/s
+    KEY_TIMEOUT=0.5     seconds of coast after the last repeated base key
     JOINT_STEP=10       degrees added per arm key press
     JOINT_SPEED=60      deg/s slew rate for the arm
     ARM_TIMEOUT=0.3     seconds after the last arm key before the target is dropped
     MAX_LEAD=30         max degrees the target may run ahead of the arm
     ARM_PERIOD=0.05     seconds between pose publications
 
-Topics:
+Topic summary
+-------------
+    /cmd_vel              geometry_msgs/Twist       base
     /position_write_topic swiftpro/position         arm x,y,z (mm)
     /pump_topic           swiftpro/status           vacuum 1/0
     /SwiftproState_topic  swiftpro/SwiftproState    last commanded pose
 
-Safety:
+Safety
+------
 The arm moves immediately when a command is published. Keep hands, cables and
 the field clear. Press 0 before the first arm move so the script's joint state
 is synced with the physical arm. If this process is SIGKILLed while the pump is
@@ -112,23 +99,26 @@ MATH_UPPER_ARM = 158.81     # second link length, mm
 MATH_Z_OFFSET = 74.55       # z offset used by the driver IK
 MATH_BASE_OFFSET = MATH_L2 + 56.55
 
-HOME = (120.0, 0.0, 35.0)   # home pose, mm
+HOME = (120.0, 0.0, 35.0)   # home pose, mm (same as keyboard_teleop.py)
 
-# Conservative joint limits. a1/a2 maxima come from the arm model constants;
+# Conservative joint limits.  a1/a2 maxima come from the arm model constants;
 # the base is kept in the front half-plane to avoid the sin(a0)=0 singularity.
 A0_LIMITS = (5.0, 175.0)      # base yaw, degrees
 A1_LIMITS = (0.0, 135.6)      # shoulder, degrees
 A2_LIMITS = (0.0, 100.7)      # elbow, degrees
 JOINT_LIMITS = (A0_LIMITS, A1_LIMITS, A2_LIMITS)
 
-# Cartesian safety box.
+# Cartesian safety box (same spirit as keyboard_teleop.py).
 CART_LIMITS = {"x": (0.0, 350.0), "y": (-160.0, 160.0), "z": (-60.0, 170.0)}
 
-JOINT_STEP = float(os.environ.get("JOINT_STEP", "10"))     # deg / press
-JOINT_SPEED = float(os.environ.get("JOINT_SPEED", "60"))   # deg / s
-ARM_TIMEOUT = float(os.environ.get("ARM_TIMEOUT", "0.3"))  # s
-MAX_LEAD = float(os.environ.get("MAX_LEAD", "30"))         # deg
-ARM_PERIOD = float(os.environ.get("ARM_PERIOD", "0.05"))   # s
+LIN_SPEED = float(os.environ.get("LIN_SPEED", "0.15"))       # m/s
+ANG_SPEED = float(os.environ.get("ANG_SPEED", "0.6"))        # rad/s
+KEY_TIMEOUT = float(os.environ.get("KEY_TIMEOUT", "0.5"))    # s
+JOINT_STEP = float(os.environ.get("JOINT_STEP", "10"))       # deg / press
+JOINT_SPEED = float(os.environ.get("JOINT_SPEED", "60"))     # deg / s
+ARM_TIMEOUT = float(os.environ.get("ARM_TIMEOUT", "0.3"))    # s
+MAX_LEAD = float(os.environ.get("MAX_LEAD", "30"))           # deg
+ARM_PERIOD = float(os.environ.get("ARM_PERIOD", "0.05"))     # s
 
 
 def fk(a0, a1, a2):
@@ -172,38 +162,6 @@ def ik(x, y, z):
 
 HOME_JOINTS = ik(*HOME) or (90.0, 103.4, 58.4)
 
-# The board's swiftpro driver only publishes /SwiftproState_topic *after* it
-# receives a command: while the arm is idle there is no pose feedback at all.
-# So remember the last pose this script commanded and reuse it on the next run.
-STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          ".arm_last_pose")
-
-
-def save_pose(x, y, z):
-    """Remember the last commanded Cartesian pose (best effort, never fatal)."""
-    try:
-        tmp = STATE_FILE + ".tmp"
-        with open(tmp, "w") as handle:
-            handle.write("%.3f %.3f %.3f\n" % (x, y, z))
-        os.replace(tmp, STATE_FILE)
-    except OSError:
-        pass
-
-
-def load_saved_pose():
-    """Joints from the last pose this script commanded, or None."""
-    try:
-        with open(STATE_FILE) as handle:
-            x, y, z = [float(value) for value in handle.read().split()]
-    except (OSError, ValueError):
-        return None
-    joints = ik(x, y, z)
-    if joints is None:
-        return None
-    if not all(lo <= value <= hi for value, (lo, hi) in zip(joints, JOINT_LIMITS)):
-        return None
-    return joints
-
 
 def _check_kinematics():
     """Self-check: fk(ik(p)) == p and ik(fk(a)) == a."""
@@ -244,17 +202,18 @@ if "--check-kinematics" in sys.argv:
     sys.exit(0 if _check_kinematics() else 1)
 
 import rospy
+from geometry_msgs.msg import Twist
 from swiftpro.msg import SwiftproState, position, status
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from arm_ik import ik_reachable
 
 HELP = """
+  Base:  w forward   s backward   a turn left   d turn right   (hold)
   Arm:   4 base left   6 base right
          7 upper arm up   9 upper arm down
          8 extend forearm  2 fold forearm        (10 deg per press)
   Enter: vacuum ON/OFF       0: release + arm home       Ctrl+C: stop
-  A:     re-attach arm motors (press if keys are accepted but the arm is still)
 """
 
 
@@ -368,83 +327,34 @@ class Arm:
 
 
 class ArmStateReader:
-    """Use /SwiftproState_topic to initialise the joint state when available.
-
-    The driver may publish nothing while the arm is idle (or stream the last
-    commanded pose continuously). A saved pose seeds the state; the first
-    plausible live message overrides it once, then the script tracks its own
-    target and ignores further feedback.
-    """
+    """Use /SwiftproState_topic to initialise the joint state when available."""
 
     def __init__(self, arm):
         self.arm = arm
-        self.live_used = False
 
     def callback(self, msg):
-        if self.live_used:
+        if self.arm.synced:
             return
-        if abs(msg.x) <= 1.0 and abs(msg.y) <= 1.0 and abs(msg.z) <= 1.0:
-            return
-        joints = ik(msg.x, msg.y, msg.z)
-        if joints is None:
-            return
-        in_limits = all(lo <= v <= hi for v, (lo, hi) in zip(joints, JOINT_LIMITS))
-        if not in_limits:
-            return
-        self.arm.sync_to(joints)
-        self.live_used = True
-        print("arm synced from /SwiftproState_topic: a0=%.1f a1=%.1f a2=%.1f"
-              % tuple(joints))
-
-
-def _status_report():
-    """Print what is connected and what pose the script would start from."""
-    rospy.init_node("arm_status", anonymous=True, argv=[sys.argv[0]])
-    pos_pub = rospy.Publisher("/position_write_topic", position, queue_size=1)
-    pump_pub = rospy.Publisher("/pump_topic", status, queue_size=1)
-
-    arm = Arm()
-    saved = load_saved_pose()
-    if saved is not None:
-        arm.sync_to(saved)
-    reader = ArmStateReader(arm)
-    rospy.Subscriber("/SwiftproState_topic", SwiftproState, reader.callback, queue_size=1)
-    rospy.sleep(2.0)          # let one live state message arrive, if any
-
-    print("position_write_topic subscribers: %d" % pos_pub.get_num_connections())
-    print("pump_topic subscribers:           %d" % pump_pub.get_num_connections())
-    if saved is not None:
-        print("saved pose (last commanded): x=%.1f y=%.1f z=%.1f" % fk(*saved))
-    else:
-        print("saved pose (last commanded): none")
-    if arm.synced:
-        print("start pose:                  x=%.1f y=%.1f z=%.1f" % fk(*arm.current))
-        print("ready - arm keys will work")
-    else:
-        print("start pose:                  unknown")
-        print("press 0 once when you run arm.py (the driver reports no pose while idle)")
-    return 0
+        if abs(msg.x) > 1.0 or abs(msg.y) > 1.0 or abs(msg.z) > 1.0:
+            joints = ik(msg.x, msg.y, msg.z)
+            if joints is None:
+                return
+            in_limits = all(lo <= v <= hi for v, (lo, hi) in zip(joints, JOINT_LIMITS))
+            if not in_limits:
+                return
+            self.arm.sync_to(joints)
+            print("arm synced from /SwiftproState_topic: a0=%.1f a1=%.1f a2=%.1f"
+                  % tuple(joints))
 
 
 def main():
-    if not sys.stdin.isatty():
-        print("arm.py needs a real terminal (termios raw mode).")
-        print("Run it in an SSH window:  run python3 <path>/arm.py")
-        print("Do not start it from roslaunch, nohup, or with stdin redirected.")
-        return 1
+    rospy.init_node("key_fullbody", anonymous=True, argv=[sys.argv[0]])
 
-    rospy.init_node("arm", anonymous=True, argv=[sys.argv[0]])
-
+    cmd_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=1)
     pos_pub = rospy.Publisher("/position_write_topic", position, queue_size=1)
     pump_pub = rospy.Publisher("/pump_topic", status, queue_size=1)
-    status_pub = rospy.Publisher("/swiftpro_status_topic", status, queue_size=1)
 
     arm = Arm()
-    saved = load_saved_pose()
-    if saved is not None:
-        arm.sync_to(saved)
-        print("resumed from saved pose: x=%.1f y=%.1f z=%.1f (a0=%.1f a1=%.1f a2=%.1f)"
-              % (fk(*saved) + tuple(saved)))
     state_reader = ArmStateReader(arm)
     rospy.Subscriber("/SwiftproState_topic", SwiftproState, state_reader.callback, queue_size=1)
     rospy.sleep(0.5)
@@ -459,44 +369,28 @@ def main():
             print("WARNING: no subscriber on %s." % topic)
             print("         %s" % hint)
 
+    wait_for(cmd_pub, "/cmd_vel",
+             "Start the base driver: roslaunch spark_bringup driver_bringup.launch "
+             "camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6")
     wait_for(pos_pub, "/position_write_topic",
              "Start the arm driver: roslaunch swiftpro pro_control_nomoveit.launch\n"
              "         Arm keys and the pump will not work until it is running.")
     wait_for(pump_pub, "/pump_topic",
              "The arm driver (swiftpro) also provides the vacuum pump.")
 
-    def attach_arm():
-        """Send the 0 -> 1 pair: M2019 detaches the motors, M17 attaches them.
-
-        The arm is detached after power-on: poses are accepted and echoed on
-        /SwiftproState_topic but the motors do not move until this runs.
-        """
-        print("attaching arm motors (0 -> 1 on /swiftpro_status_topic)...")
-        status_pub.publish(0)
-        rospy.sleep(1.0)
-        status_pub.publish(1)
-        rospy.sleep(1.0)
-        print("  arm attached - motors enabled")
-
-    wait_for(status_pub, "/swiftpro_status_topic",
-             "The arm driver (swiftpro) also handles motor attach.")
-    if status_pub.get_num_connections() > 0:
-        attach_arm()
-
     if not arm.synced:
-        print("")
-        print("  ARM NOT SYNCED - arm keys are ignored until the pose is known.")
-        print("  The swiftpro driver publishes no pose while the arm is idle, so the")
-        print("  first run needs ONE home command:")
-        print("      press 0 once  ->  release the pump and send the arm to home")
-        print("  After that the pose is saved and later runs resume automatically.")
-        print("  Run  python3 arm.py --status  to inspect the topics first.")
-        print("")
+        print("  arm pose unknown - press 0 first to home/sync the arm.")
 
     def set_pump(on):
         msg = status()
         msg.status = 1 if on else 0
         pump_pub.publish(msg)
+
+    def set_base(linear, angular):
+        twist = Twist()
+        twist.linear.x = linear
+        twist.angular.z = angular
+        cmd_pub.publish(twist)
 
     def publish_pose(x, y, z):
         msg = position()
@@ -504,20 +398,21 @@ def main():
         pos_pub.publish(msg)
         arm.last_pose = (x, y, z)
         arm.last_pub = time.time()
-        save_pose(x, y, z)          # so the next run can resume without homing
 
     print(HELP)
-    print("  arm: %.0f deg/press at %.0f deg/s" % (JOINT_STEP, JOINT_SPEED))
+    print("  base: %.2f m/s / %.2f rad/s   arm: %.0f deg/press at %.0f deg/s"
+          % (LIN_SPEED, ANG_SPEED, JOINT_STEP, JOINT_SPEED))
     print("  arm limits: base %.0f..%.0f  shoulder %.0f..%.0f  elbow %.0f..%.0f"
           % (A0_LIMITS + A1_LIMITS + A2_LIMITS))
 
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
 
+    linear = angular = 0.0
+    last_base_key = 0.0
     last_arm_key = 0.0
     pump_on = False
     last_loop = time.time()
-    sync_warned = False
 
     try:
         tty.setraw(fd)
@@ -532,23 +427,29 @@ def main():
 
                 if char == "\x03":                       # Ctrl+C
                     break
-                elif char in ("a", "A"):                 # re-attach motors
-                    attach_arm()
+                elif char in "wWaAsSdD":                 # base
+                    key = char.lower()
+                    if key == "w":
+                        linear, angular = LIN_SPEED, 0.0
+                    elif key == "s":
+                        linear, angular = -LIN_SPEED, 0.0
+                    elif key == "a":
+                        linear, angular = 0.0, ANG_SPEED
+                    elif key == "d":
+                        linear, angular = 0.0, -ANG_SPEED
+                    last_base_key = now
                 elif char in "482769":                   # arm joints
                     last_arm_key = now
                     axis, direction = {
                         "4": (0, +1),   # base left
                         "6": (0, -1),   # base right
-                        "7": (1, -1),   # shoulder: raise
-                        "9": (1, +1),   # shoulder: lower
-                        "8": (2, -1),   # elbow: extend
-                        "2": (2, +1),   # elbow: fold
+                        "7": (1, -1),   # shoulder: raise (was 8)
+                        "9": (1, +1),   # shoulder: lower (was 2)
+                        "8": (2, -1),   # elbow: extend (was 7)
+                        "2": (2, +1),   # elbow: fold (was 9)
                     }[char]
                     if not arm.jog(axis, direction):
-                        if not sync_warned:
-                            print("  arm not synced - press 0 once to home/sync "
-                                  "(arm keys stay disabled until then).")
-                            sync_warned = True
+                        print("  arm not synced - press 0 first.")
                 elif char in ("\r", "\n"):               # Enter
                     pump_on = not pump_on
                     set_pump(pump_on)
@@ -556,6 +457,8 @@ def main():
                 elif char == "0":                        # release + home
                     pump_on = False
                     set_pump(False)
+                    set_base(0.0, 0.0)
+                    linear = angular = 0.0
                     if pos_pub.get_num_connections() == 0:
                         print("RELEASE - arm driver not running, home not sent")
                     else:
@@ -564,6 +467,11 @@ def main():
                         publish_pose(x, y, z)
                         print("RELEASE + HOME  (a0=%.1f a1=%.1f a2=%.1f)"
                               % tuple(arm.current))
+
+            # Base: stop after the last repeated key.
+            if now - last_base_key > KEY_TIMEOUT:
+                linear = angular = 0.0
+            set_base(linear, angular)
 
             # Arm: drop the remaining target when the key has been released.
             if now - last_arm_key > ARM_TIMEOUT:
@@ -579,13 +487,14 @@ def main():
 
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        set_base(0.0, 0.0)
+        rospy.sleep(0.1)
+        set_base(0.0, 0.0)
         set_pump(False)
         rospy.sleep(0.1)
         set_pump(False)
-        print("\nstopped - pump off")
+        print("\nstopped - base stopped, pump off")
 
 
 if __name__ == "__main__":
-    if "--status" in sys.argv:
-        sys.exit(_status_report())
-    sys.exit(main() or 0)
+    main()

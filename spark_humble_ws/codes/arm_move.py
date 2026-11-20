@@ -7,9 +7,9 @@ Prerequisite: arm driver running on the robot:
 
 Usage:
     source ~/spark_noetic/devel/setup.bash
-    python3 ~/codes/arm_move.py --x 200 --y 0 --z 20
-    python3 ~/codes/arm_move.py --home
-    python3 ~/codes/arm_move.py --x 198.8 --y 0.6 --z -50
+    python3 ~/semi/arm_move.py --x 200 --y 0 --z 20
+    python3 ~/semi/arm_move.py --home
+    python3 ~/semi/arm_move.py --x 198.8 --y 0.6 --z -50
 
 Coordinates are in the same units as ~/thefile.txt (millimetres).
 Home preset: (120, 0, 35).

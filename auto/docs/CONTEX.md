@@ -63,13 +63,13 @@
       (SSH / SCP)
           ▼
 [Робот NXROBO Spark (Ubuntu 20.04)]
-  ├── ~/codes/dashboard.sh   --> Интерактивное меню оператора (1-7)
-  ├── ~/codes/start_system.sh--> Фоновый запуск стека ROS (bringup, swiftpro, auto_match)
-  ├── ~/codes/stop_system.sh --> Мягкая и аварийная остановка всех процессов
-  ├── ~/codes/keypatched2v.py--> Плавное телеуправление (WASD, самоподключение путей ROS)
-  ├── ~/codes/camera_stream.py-> MJPEG-стрим камеры на порт 8080
-  ├── ~/codes/arm_ik.py      --> Геометрическая модель и проверка reachability
-  └── ~/codes/runtask.py     --> Конечный автомат соревнований (FSM)
+  ├── ~/semi/dashboard.sh   --> Интерактивное меню оператора (1-7)
+  ├── ~/semi/start_system.sh--> Фоновый запуск стека ROS (bringup, swiftpro, auto_match)
+  ├── ~/semi/stop_system.sh --> Мягкая и аварийная остановка всех процессов
+  ├── ~/semi/keypatched2v.py--> Плавное телеуправление (WASD, самоподключение путей ROS)
+  ├── ~/semi/camera_stream.py-> MJPEG-стрим камеры на порт 8080
+  ├── ~/semi/arm_ik.py      --> Геометрическая модель и проверка reachability
+  └── ~/semi/runtask.py     --> Конечный автомат соревнований (FSM)
 ```
 
 ---

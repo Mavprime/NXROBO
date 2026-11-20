@@ -14,14 +14,14 @@ Prerequisite: the camera driver must be running:
 
 Run:
     source ~/spark_noetic/devel/setup.bash
-    python3 ~/codes/camera_stream.py
+    python3 ~/semi/camera_stream.py
 
 Environment:
     PORT=8080        HTTP port
     QUALITY=80       JPEG quality
     FPS=30           maximum stream rate
 
-For a detection overlay, run ~/codes/blue_view.py on the robot screen instead
+For a detection overlay, run ~/semi/blue_view.py on the robot screen instead
 (or ask for an overlay option in this stream).
 """
 

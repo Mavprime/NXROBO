@@ -8,7 +8,7 @@ a display:
 
     export DISPLAY=:0
     export XAUTHORITY=$HOME/.Xauthority
-    python3 ~/codes/blue_view.py
+    python3 ~/semi/blue_view.py
 
 Press Ctrl+C in the terminal, or `pkill -f blue_view.py`, to close it.
 """

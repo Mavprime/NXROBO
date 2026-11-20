@@ -148,8 +148,8 @@ rostopic pub -1 /position_write_topic swiftpro/position "{x: 198.8, y: 0.6, z: -
 # home
 rostopic pub -1 /position_write_topic swiftpro/position "{x: 120.0, y: 0.0, z: 35.0}"</pre>
 <p>Or use the helper script (section 8):</p>
-<pre>python3 ~/codes/arm_move.py --x 198.8 --y 0.6 --z 20
-python3 ~/codes/arm_move.py --home</pre>
+<pre>python3 ~/semi/arm_move.py --x 198.8 --y 0.6 --z 20
+python3 ~/semi/arm_move.py --home</pre>
 <p><strong>Note:</strong> The arm moves directly to the pose. Keep hands clear. If it stops short, use z = -60; if it presses too hard, use z = -40.</p>
 
 <h2>7. Blue-box detection</h2>
@@ -170,24 +170,24 @@ if abs(xc - xc_prev) &lt;= 6 and abs(yc - yc_prev) &lt;= 6:</pre>
 
 <h3>7.3 Live detector</h3>
 <pre>source ~/spark_noetic/devel/setup.bash
-python3 ~/codes/blue_detect.py</pre>
+python3 ~/semi/blue_detect.py</pre>
 <p>Example output:</p>
 <pre>BLUE area=14793 center=(415,310)
 BLUE area=15266 center=(415,312)</pre>
 
 <h3>7.4 Snapshot for debugging</h3>
-<pre>python3 ~/codes/blue_snap.py /tmp/blue.png /tmp/blue_mask.png
+<pre>python3 ~/semi/blue_snap.py /tmp/blue.png /tmp/blue_mask.png
 # from your PC:
 scp spark@10.24.170.0:/tmp/blue.png spark@10.24.170.0:/tmp/blue_mask.png .</pre>
 
 <h3>7.5 Detect and touch</h3>
 <p>Detects the box, converts the pixel centre through <code>thefile.txt</code>, moves to
 <code>z=20</code>, then <code>z=-50</code>, then home.</p>
-<pre>python3 ~/codes/touch_blue.py
-python3 ~/codes/touch_blue.py --dry-run   # print coordinates, do not move</pre>
+<pre>python3 ~/semi/touch_blue.py
+python3 ~/semi/touch_blue.py --dry-run   # print coordinates, do not move</pre>
 
 <h3>7.6 Detection-pipeline debug</h3>
-<pre>python3 ~/codes/detect_pipeline_debug.py</pre>
+<pre>python3 ~/semi/detect_pipeline_debug.py</pre>
 <p>Prints per-frame contour area, centroid and stability count. Use it when the grasp demo
 keeps printing <code>not found</code>.</p>
 
@@ -262,13 +262,13 @@ includes <code>hm_spark.launch</code> - do not start it twice. The task starts w
 </table>
 
 <h3>11.1 Copy the scripts to the robot</h3>
-<pre>scp -r "/home/mav/Documents/Extra/ROS Comp/codes" spark@10.24.170.0:/home/spark/codes
-ssh spark@10.24.170.0 "chmod +x /home/spark/codes/*.py"</pre>
+<pre>scp -r "/home/mav/Documents/Extra/ROS Comp/semi" spark@10.24.170.0:/home/spark/semi
+ssh spark@10.24.170.0 "chmod +x /home/spark/semi/*.py"</pre>
 
 <h3>11.2 Run them</h3>
 <pre>ssh spark@10.24.170.0
 source ~/spark_noetic/devel/setup.bash
-python3 ~/codes/blue_detect.py</pre>
+python3 ~/semi/blue_detect.py</pre>
 <p>All scripts assume the camera driver (<code>spark_bringup</code>) is running. The touch and
 move scripts also need the arm driver (<code>swiftpro</code>).</p>
 

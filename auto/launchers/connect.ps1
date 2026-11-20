@@ -27,8 +27,8 @@ if ($userInput -and $userInput.Trim() -ne "") {
 Write-Host "`n>> [1/2] Synchronizing updated scripts to robot ($IP)..." -ForegroundColor Yellow
 scp "$codesDir\runtask.py" "spark@${IP}:/home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/runtask.py"
 scp "$codesDir\detect_ros.py" "spark@${IP}:/home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/detect_ros.py"
-scp "$codesDir\runtask.py" "$codesDir\keypatched2v.py" "$codesDir\arm_ik.py" "$codesDir\start_system.sh" "$codesDir\stop_system.sh" "$codesDir\dashboard.sh" "$codesDir\camera_stream.py" "$codesDir\test_all_systems.py" "$codesDir\test_all_systems.sh" "$codesDir\view_log.py" "spark@${IP}:/home/spark/codes/"
-ssh "spark@${IP}" "chmod +x /home/spark/codes/*.sh /home/spark/codes/*.py /home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/runtask.py /home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/detect_ros.py; FORCE_DETECT=1 bash /home/spark/codes/start_system.sh"
+scp "$codesDir\runtask.py" "$codesDir\keypatched2v.py" "$codesDir\arm_ik.py" "$codesDir\start_system.sh" "$codesDir\stop_system.sh" "$codesDir\dashboard.sh" "$codesDir\camera_stream.py" "$codesDir\test_all_systems.py" "$codesDir\test_all_systems.sh" "$codesDir\view_log.py" "spark@${IP}:/home/spark/semi/"
+ssh "spark@${IP}" "chmod +x /home/spark/semi/*.sh /home/spark/semi/*.py /home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/runtask.py /home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/detect_ros.py; FORCE_DETECT=1 bash /home/spark/semi/start_system.sh"
 
 Write-Host ">> [OK] All scripts on robot are up to date!" -ForegroundColor Green
 
@@ -36,7 +36,7 @@ Write-Host ">> [OK] All scripts on robot are up to date!" -ForegroundColor Green
 Write-Host "`n>> [2/2] Entering interactive robot dashboard..." -ForegroundColor Cyan
 Write-Host "--------------------------------------------------------------" -ForegroundColor DarkGray
 
-ssh -t "spark@${IP}" "bash -ic '~/codes/dashboard.sh'"
+ssh -t "spark@${IP}" "bash -ic '~/semi/dashboard.sh'"
 
 Write-Host "`n--------------------------------------------------------------" -ForegroundColor DarkGray
 Write-Host "Control session ended." -ForegroundColor Yellow

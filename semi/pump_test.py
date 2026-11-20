@@ -9,8 +9,8 @@ Prerequisite: the arm driver must be running:
     roslaunch swiftpro pro_control_nomoveit.launch
 
 Usage:
-    python3 ~/codes/pump_test.py          # 3 seconds
-    python3 ~/codes/pump_test.py 5        # custom duration
+    python3 ~/semi/pump_test.py          # 3 seconds
+    python3 ~/semi/pump_test.py 5        # custom duration
 
 Keep pump runs short (a few seconds). Do not leave it running unattended.
 """

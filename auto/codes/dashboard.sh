@@ -16,7 +16,7 @@ if [ "${DASHBOARD_NO_AUTOSTART:-0}" != "1" ]; then
     rosnode list 2>/dev/null | grep -qx /detector_node || need_start=1
     if [ "$need_start" = "1" ]; then
         echo ">> Core services are down. Starting everything automatically..."
-        bash ~/codes/start_system.sh
+        bash ~/semi/start_system.sh
         sleep 1
     fi
 fi
@@ -50,7 +50,7 @@ while true; do
 
     case $choice in
         1)
-            bash ~/codes/start_system.sh
+            bash ~/semi/start_system.sh
             echo ""
             read -p "Press Enter to return to menu..."
             ;;
@@ -58,7 +58,7 @@ while true; do
             if ! pgrep -f "spark_base_server" > /dev/null || ! pgrep -f "detect_ros.py" > /dev/null || ! pgrep -f "pro_control_nomoveit" > /dev/null; then
                 echo ">> [WARNING] Required subsystems are not running!"
                 echo ">> Auto-starting base, camera, detector and arm via start_system.sh..."
-                bash ~/codes/start_system.sh
+                bash ~/semi/start_system.sh
                 echo ">> Waiting 4s for neural network to warm up..."
                 sleep 4
             fi
@@ -94,19 +94,19 @@ while true; do
         4)
             trap - INT  # Restore Ctrl+C for teleoperation
             # Auto-detect newest teleoperation script:
-            TELEOP_SCRIPT=$(ls -t ~/codes/key*.py ~/codes/*teleop*.py 2>/dev/null | head -n 1)
+            TELEOP_SCRIPT=$(ls -t ~/semi/key*.py ~/semi/*teleop*.py 2>/dev/null | head -n 1)
             if [ -n "$TELEOP_SCRIPT" ] && [ -f "$TELEOP_SCRIPT" ]; then
                 echo "Launching teleoperation script: $TELEOP_SCRIPT"
                 python3 "$TELEOP_SCRIPT"
             else
-                echo "Teleoperation script not found in ~/codes/. Place key*.py or *teleop*.py"
+                echo "Teleoperation script not found in ~/semi/. Place key*.py or *teleop*.py"
                 sleep 2
             fi
             ;;
         5)
             trap - INT
-            if [ -f ~/codes/view_log.py ]; then
-                python3 ~/codes/view_log.py
+            if [ -f ~/semi/view_log.py ]; then
+                python3 ~/semi/view_log.py
             else
                 echo ">> Viewing live log. Press Ctrl+C to return to menu:"
                 tail -n 25 -f ~/logs/runtask.log
@@ -114,12 +114,12 @@ while true; do
             trap '' INT
             ;;
         6)
-            bash ~/codes/stop_system.sh
+            bash ~/semi/stop_system.sh
             echo ""
             read -p "Press Enter to return to menu..."
             ;;
         7)
-            bash ~/codes/test_all_systems.sh
+            bash ~/semi/test_all_systems.sh
             echo ""
             read -p "Press Enter to return to menu..."
             ;;
