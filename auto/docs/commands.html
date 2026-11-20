@@ -7,6 +7,7 @@
   body { font-family: sans-serif; max-width: 900px; margin: 2em auto; line-height: 1.5; }
   h1 { border-bottom: 2px solid #333; padding-bottom: .3em; }
   h2 { margin-top: 1.6em; border-bottom: 1px solid #ccc; padding-bottom: .2em; }
+  h3 { margin-top: 1.2em; }
   pre { background: #f2f2f2; padding: .8em; overflow-x: auto; }
   code { background: #f2f2f2; padding: 0 .2em; }
   .note { background: #fff8e1; padding: .7em; border-left: 4px solid #f0c000; }
@@ -29,6 +30,52 @@ every driver.</p>
 python3 ~/auto/codes/body.py</pre>
 <p>Base-only keyboard teleop: <code>w</code>/<code>s</code> drive forward/back, <code>a</code>/<code>d</code>
 turn. <code>Ctrl+C</code> stops the base; the server in T1 keeps running.</p>
+
+<h2>Auto match (commands from the manual)</h2>
+<p>These are the commands in <em>CN spark configure</em> sections 2-3. They use the vendor's
+<code>auto_match</code> package, not <code>~/auto/codes</code>.</p>
+
+<h3>Hand-eye calibration</h3>
+<pre>cd ~/spark_noetic/
+./onekey.sh
+# choose 8, then uArm, then Enter
+# rotate the camera until the green pattern lines up with the red square, Enter
+# result is saved to ~/thefile.txt</pre>
+
+<h3>Install the package</h3>
+<pre>sudo unzip auto_match_25.zip -d /home/spark/spark_noetic/src/3rd_app/
+# password: spark
+cd ~/spark_noetic
+catkin_make</pre>
+
+<h3>Make the nodes executable</h3>
+<pre>cd ~/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes
+sudo chmod +x *.py
+cd ../scripts
+sudo chmod +x *.sh</pre>
+
+<h3>Build the map and record waypoints</h3>
+<pre>cd ~/spark_noetic
+source devel/setup.bash
+roslaunch auto_match auto_match.launch open_guide:=true</pre>
+<p>Drive with WASD; Enter records the current point. Record every point before saving - the script
+stores <code>Classification_area</code>, <code>Collection_B</code>, <code>Sorting_N</code> and
+<code>Sorting_W</code> in <code>config/mark_map.pkl</code> and then saves the map.</p>
+
+<h3>Run the task</h3>
+<pre>cd ~/spark_noetic
+source devel/setup.bash
+roslaunch auto_match auto_match.launch</pre>
+<pre># second terminal
+rostopic pub /task_start_flag std_msgs/String "data: 'true'" -1 >/dev/null</pre>
+
+<div class="note">
+<p>The Python excerpts the manual walks through are saved next to this file:
+<code>mark_move.py</code> (waypoints and navigation, section 3.2),
+<code>runtask.py</code> (task flow, navigation timeout, grasp, 3.3-3.6) and
+<code>detect_ros.py</code> (TF SSD-MobileNet detector, 3.7). They are partial
+transcriptions, not complete nodes.</p>
+</div>
 
 </body>
 </html>
