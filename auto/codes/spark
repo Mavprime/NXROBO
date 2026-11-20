@@ -11,8 +11,15 @@
 #   roslaunch spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6
 # then ~/codes/spark <code>.py will just reuse that running master.
 
-set -u
+set +u  # catkin's setup.bash is not nounset-safe
+# Hide the script's arguments while sourcing: catkin's setup.sh treats $@ as
+# its own flags (--extend etc.) and prints usage instead of setting ROS paths.
+_spark_args=("$@")
+set --
 source "$HOME/spark_noetic/devel/setup.bash"
+set -- "${_spark_args[@]}"
+unset _spark_args
+set -u
 LAUNCH=${SPARK_LAUNCH:-$HOME/codes/server.launch}
 LOG=$HOME/server.log
 
@@ -34,7 +41,7 @@ start_server() {
 case ${1:-} in
   --stop)   pkill -f "roslaunch.*$(basename "$LAUNCH")"; echo "[spark] stop sent" ;;
   --status) master_up && rosnode list || echo "[spark] server not running" ;;
-  ""|-h|--help) sed -n '2,14p' "$0" ;;
+  ""|-h|--help) sed -n '2,12p' "$0" ;;
   *)
     start_server || exit 1
     script=$1; shift
