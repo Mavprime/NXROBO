@@ -1,0 +1,43 @@
+# SSH Keys & Credentials (CRITICAL - DO NOT COMMIT)
+.ssh_key
+.ssh_key.pub
+*.pem
+*.key
+id_rsa*
+
+# Local dynamic IP config
+robot_ip.txt
+
+# Large binaries & external installers
+MobaXterm/
+*.dat
+*.msi
+*.exe
+
+# Backup files
+*_backup.py
+*.bak
+*.orig
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyc
+*$py.class
+.pytest_cache/
+
+# ROS log & bag files
+*.bag
+*.log
+
+# OS & Editor generated files
+.vscode/
+.idea/
+.agents/
+Thumbs.db
+.DS_Store
+desktop.ini
+~$*
+
+# Robot state
+.arm_last_pose

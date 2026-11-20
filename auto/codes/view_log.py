@@ -29,7 +29,7 @@ def main():
             f.write("=== LOG CREATED ===\n")
 
     print("\033[96m======================================================\033[0m")
-    print("\033[93m  ЖИВОЙ ЛОГ RUNTASK. Нажмите 'q' или Ctrl+C для выхода\033[0m")
+    print("\033[93m  LIVE RUNTASK LOG. Press 'q' or Ctrl+C to exit\033[0m")
     print("\033[96m======================================================\033[0m")
 
     with open(LOG_PATH, "r", errors="ignore") as f:
@@ -58,7 +58,7 @@ def main():
         finally:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
 
-    print("\n\033[92m>> Возврат в главное меню...\033[0m")
+    print("\n\033[92m>> Returning to main menu...\033[0m")
     time.sleep(0.3)
 
 

@@ -17,23 +17,23 @@
 
 <h1>Spark Robot - Commands</h1>
 <p>Two terminals on the robot: <strong>T1</strong> starts ROS and the hardware drivers, <strong>T2</strong>
-runs <code>~/codes/body.py</code>. Keep T1 open while T2 is running.</p>
+runs <code>~/auto/codes/body.py</code>. Keep T1 open while T2 is running.</p>
 
 <h2>T1 - server (keep it open)</h2>
 <pre>source ~/spark_noetic/devel/setup.bash
-roslaunch ~/codes/server.launch</pre>
+roslaunch ~/auto/codes/server.launch</pre>
 <p>Starts the ROS master, the base driver and the uArm. Closing this terminal stops the master and
 every driver.</p>
 
 <h2>T2 - body.py</h2>
 <pre>source ~/spark_noetic/devel/setup.bash
-python3 ~/codes/body.py</pre>
+python3 ~/auto/codes/body.py</pre>
 <p>Base-only keyboard teleop: <code>w</code>/<code>s</code> drive forward/back, <code>a</code>/<code>d</code>
 turn. <code>Ctrl+C</code> stops the base; the server in T1 keeps running.</p>
 
 <h2>Auto match (commands from the manual)</h2>
 <p>These are the commands in <em>CN spark configure</em> sections 2-3. They use the vendor's
-<code>auto_match</code> package, not <code>~/codes</code>.</p>
+<code>auto_match</code> package, not <code>~/auto/codes</code>.</p>
 
 <h3>Hand-eye calibration</h3>
 <pre>cd ~/spark_noetic/

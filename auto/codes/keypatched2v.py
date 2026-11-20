@@ -43,7 +43,7 @@ import termios
 import time
 import tty
 
-# Автоматическое подключение окружения ROS Noetic, если скрипт запущен напрямую без source
+# Automatically source ROS Noetic environment if script is launched directly without sourcing
 for _ros_path in [
     '/opt/ros/noetic/lib/python3/dist-packages',
     os.path.expanduser('~/spark_noetic/devel/lib/python3/dist-packages'),
@@ -424,11 +424,11 @@ class SparkTeleopNode:
                 self.publish_pose()
                 self.publish_angle()
                 safe_print(
-                    f">> MOTORS LOCKED (M17) - синхронизировано с текущим положением "
+                    f">> MOTORS LOCKED (M17) - synchronized with current position "
                     f"(X={self.arm.x:.1f}, Y={self.arm.y:.1f}, Z={self.arm.z:.1f})"
                 )
             else:
-                safe_print(">> MOTORS RELAXED (M2019) - выровняйте рукой и нажмите 'r' для фиксации!")
+                safe_print(">> MOTORS RELAXED (M2019) - align arm manually and press 'r' to lock!")
 
         elif char == "0":  # Release + Home
             self.set_pump(False)

@@ -1,179 +1,215 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""YOLO object detector for the Spark competition (publishes /objects).
+
+Two YOLOv5 models are run on every frame (the generic model plus a banana
+specialist).  They can both report the same physical cube, so their detections
+are merged with ``match_logic.dedupe_boxes`` before publishing: one physical
+cube = one entry in /objects.  Without this, the FSM could pick a duplicated
+box as its target.
+
+Test-time augmentation is OFF by default: it triples inference time on the
+on-board NUC and the FSM already votes over several frames
+(``runtask.py: GRASP_FRAMES``).  Enable it with ``~augment:=true`` only if the
+CPU has headroom.
+"""
 
 import os
+import pathlib
+import platform
+
 import cv2
 import yolov5
 import rospy
 import rospkg
 import yaml
-from std_msgs.msg import *
-from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
+from sensor_msgs.msg import Image
 from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
-import platform
-import pathlib
-plt = platform.system()
-if plt != 'Windows':
+
+import match_logic
+
+# Torch checkpoints saved on Windows carry WindowsPath objects; they cannot be
+# unpickled on Linux without this alias.
+if platform.system() != 'Windows':
     pathlib.WindowsPath = pathlib.PosixPath
 
-class SparkDetect:
-    class __results__:
-        def __init__(self):
-            self.name = []
-            self.x = []
-            self.y = []
-            self.size_x = []
-            self.size_y = []
-            self.confidence = []
-            self.image = None
+# Everything below this confidence is published; the FSM applies its own,
+# stricter grasp threshold (match_logic.CONF_THRESHOLD).
+PUBLISH_CONF = 0.35
 
-    def __init__(self, model_path_1,model_path_2):
-        '''
-        初始化YOLOv5检测器
-        :param model_path: YOLOv5模型文件路径
-        '''
-        # try:
+# Only competition classes are meaningful downstream. items_config.yaml also
+# declares ``base: 99`` and YOLO happily detects the robot's own base at 0.95,
+# which used to fill /objects with an id the FSM ignores anyway.
+REPORTED_IDS = frozenset(match_logic.ID_MAP)
+
+
+class SparkDetect:
+    """Dual-model YOLOv5 detector with cross-model de-duplication."""
+
+    def __init__(self, model_path_1, model_path_2, augment=False,
+                 dedupe_px=match_logic.DEDUPE_DIST_PX):
+        self.augment = bool(augment)
+        self.dedupe_px = float(dedupe_px)
+        rospy.loginfo(f">> [SPARK-DETECT] Loading model 1: {model_path_1}")
         self.model_1 = yolov5.load(model_path_1)
-        self.model_2 = yolov5.load(model_path_2)        
-        # except Exception as e:
-        #     rospy.logerr(f"加载模型失败:{e}, 开始下载")
-        #     # 下载模型
-        #     url = "https://github.com/GentsunCheng/spark_noetic/releases/latest/download/auto.pt"
-        #     stat = os.system("wget " + url + " -O " + model_path)
-        #     if not (os.path.exists(model_path) or stat):
-        #         rospy.logerr("下载模型失败")
-        #         os.remove(model_path)
-        #         return
-        #     rospy.loginfo("下载模型成功")
-        #     self.model = yolov5.load(model_path)
+        rospy.loginfo(f">> [SPARK-DETECT] Loading model 2: {model_path_2}")
+        self.model_2 = yolov5.load(model_path_2)
+        rospy.loginfo(f">> [SPARK-DETECT] Both models loaded "
+                      f"(augment={self.augment}, dedupe={self.dedupe_px:.0f}px).")
+
+    def _collect(self, model, label, image, boxes):
+        """Append one model's detections to ``boxes`` (never raises)."""
+        try:
+            results = model(image, augment=self.augment)
+        except Exception as e:
+            rospy.logwarn_throttle(5.0, f">> [SPARK-DETECT] {label} inference failed: {e}")
+            return
+        try:
+            predictions = results.xyxy[0]
+        except Exception as e:
+            rospy.logwarn_throttle(5.0, f">> [SPARK-DETECT] {label} returned no "
+                                        f"prediction tensor: {e}")
+            return
+        for prediction in predictions:
+            try:
+                x1, y1, x2, y2, conf, cls = [float(v) for v in prediction[:6]]
+                boxes.append({
+                    "name": model.model.names[int(cls)],
+                    "score": conf,
+                    "cx": int((x1 + x2) / 2),
+                    "cy": int((y1 + y2) / 2),
+                    "size_x": int(x2 - x1),
+                    "size_y": int(y2 - y1),
+                    "x1": int(x1), "y1": int(y1),
+                    "x2": int(x2), "y2": int(y2),
+                    "model": label,
+                })
+            except Exception as e:
+                rospy.logwarn_throttle(5.0, f">> [SPARK-DETECT] bad box from "
+                                            f"{label}: {e}")
 
     def detect(self, image):
-        '''
-        检测图像中的物体
-        :param image: 输入图像
-        :return: 结果类结构
-                  result.name: 物体名称列表
-                  result.x: 物体中心点x坐标列表
-                  result.y: 物体中心点y坐标列表
-                  result.confidence: 物体置信度列表
-                  result.image: 检测后的图像
-        '''
-        results_1 = self.model_1(image, augment=True)
-        results_2 = self.model_2(image, augment=True)
-        # 存储检测结果的列表
-        result = self.__results__()
+        """Return de-duplicated boxes (dicts) for ``image``; highlights in place."""
+        boxes = []
+        self._collect(self.model_1, "model_1", image, boxes)
+        self._collect(self.model_2, "model_2", image, boxes)
+        kept = match_logic.dedupe_boxes(boxes, dist_px=self.dedupe_px)
 
-        # 遍历检测结果
-        try:
-            for *xyxy, conf, cls in results_1.xyxy[0]:
-                # 计算中心点坐标
-                center_x = int((xyxy[0] + xyxy[2]) / 2)
-                center_y = int((xyxy[1] + xyxy[3]) / 2)
-                # 计算大小
-                size_x = int(xyxy[2] - xyxy[0])
-                size_y = int(xyxy[3] - xyxy[1])
-                # 绘制图像
-                label = f'{self.model_1.model.names[int(cls)]} {conf:.2f}'
-                cv2.rectangle(image, (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3])), (0, 255, 0), 3)
-                cv2.putText(image, label, (int(xyxy[0]), int(xyxy[1]) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-                cv2.circle(image, (center_x, center_y), 5, (255, 0, 0), -1)
-
-                # 存储中心点坐标,物体名称,置信度和图像
-                result.size_x.append(size_x)
-                result.size_y.append(size_y)
-                result.name.append(self.model_1.model.names[int(cls)])
-                result.x.append(center_x)
-                result.y.append(center_y)
-                result.confidence.append(float(conf))
-
-        except Exception as _:
-            pass
-        
-        try:
-            for *xyxy, conf, cls in results_2.xyxy[0]:
-                center_x = int((xyxy[0] + xyxy[2]) / 2)
-                center_y = int((xyxy[1] + xyxy[3]) / 2)
-                size_x = int(xyxy[2] - xyxy[0])
-                size_y = int(xyxy[3] - xyxy[1])
-                label = f'{self.model_2.model.names[int(cls)]} {conf:.2f}'
-                cv2.rectangle(image, (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3])), (0, 255, 0), 3)
-                cv2.putText(image, label, (int(xyxy[0]), int(xyxy[1]) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-                cv2.circle(image, (center_x, center_y), 5, (255, 0, 0), -1)
-
-                    # 存储第二个模型的检测结果
-                result.size_x.append(size_x)
-                result.size_y.append(size_y)
-                result.name.append(self.model_2.model.names[int(cls)])
-                result.x.append(center_x)
-                result.y.append(center_y)
-                result.confidence.append(float(conf))
-        except Exception as _:
-            pass
-        
-        result.image = image
-        return result
+        for box in kept:
+            cv2.rectangle(image, (box["x1"], box["y1"]), (box["x2"], box["y2"]),
+                          (0, 255, 0), 3)
+            label = f'{box["name"]} {box["score"]:.2f}'
+            cv2.putText(image, label, (box["x1"], box["y1"] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            cv2.circle(image, (box["cx"], box["cy"]), 5, (255, 0, 0), -1)
+        return kept
 
 
 class Detector:
     def __init__(self):
-        self.image_pub = rospy.Publisher("/debug_image",Image, queue_size=1)
+        self.image_pub = rospy.Publisher("/debug_image", Image, queue_size=1)
         self.object_pub = rospy.Publisher("/objects", Detection2DArray, queue_size=1)
         self.bridge = CvBridge()
-        self.image_sub = rospy.Subscriber(
-            "/camera/color/image_raw", Image, self.image_cb, queue_size=1, buff_size=2**24
-            )
-        item_file = os.path.join(rospkg.RosPack().get_path('auto_match'),'config', 'items_config.yaml')
-        with open(item_file, 'r') as file:
-            config_contents = yaml.safe_load(file)
-            self.obj_id = config_contents['items']
+
+        self.publish_conf = float(rospy.get_param("~conf", PUBLISH_CONF))
+        augment = bool(rospy.get_param("~augment", False))
+        dedupe_px = float(rospy.get_param("~dedupe_px", match_logic.DEDUPE_DIST_PX))
+
+        # Load the competition item configuration.
+        try:
+            item_file = os.path.join(
+                rospkg.RosPack().get_path('auto_match'), 'config', 'items_config.yaml')
+        except Exception:
+            item_file = os.path.expanduser(
+                '~/spark_noetic/src/3rd_app/auto_match_25/auto_match/config/items_config.yaml')
+        if not os.path.exists(item_file):
+            alt_path = ('/home/spark/spark_noetic/src/3rd_app/auto_match_25/'
+                        'auto_match/config/items_config.yaml')
+            if os.path.exists(alt_path):
+                item_file = alt_path
+        with open(item_file, 'r') as handle:
+            config_contents = yaml.safe_load(handle)
+        self.obj_id = config_contents['items']
         self.items = list(self.obj_id.keys())
-        self.detector = SparkDetect(
-            os.environ['HOME'] + "/auto.pt",
-            os.environ['HOME'] + "/banana.pt"   
+        rospy.loginfo(f">> [DETECTOR] item classes from {item_file}: {self.items}")
+
+        # Load the models BEFORE subscribing so the first frame is not delayed
+        # and a broken checkpoint fails loudly at startup.
+        home_dir = os.environ.get('HOME', '/home/spark')
+        model1 = os.path.join(home_dir, "auto.pt")
+        model2 = os.path.join(home_dir, "banana.pt")
+        rospy.loginfo(f">> [DETECTOR] Initializing models from {home_dir} ...")
+        self.detector = SparkDetect(model1, model2, augment=augment,
+                                   dedupe_px=dedupe_px)
+        rospy.loginfo(">> [DETECTOR] Neural network models loaded and ready.")
+
+        self._frame_count = 0
+        self.image_sub = rospy.Subscriber(
+            "/camera/color/image_raw", Image, self.image_cb,
+            queue_size=1, buff_size=2 ** 24,
         )
+        rospy.loginfo(">> [DETECTOR] Subscribed to /camera/color/image_raw")
 
     def image_cb(self, data):
-        objArray = Detection2DArray()
+        obj_array = Detection2DArray()
         try:
             cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
         except CvBridgeError as e:
-            print(e)
+            rospy.logerr(f">> [DETECTOR] Bridge error: {e}")
+            return
         image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+        obj_array.header = data.header
 
-        objArray.header = data.header
         try:
-            results = self.detector.detect(image)
-            img_bgr = results.image
-            for i in range(len(results.name)):
-                if (results.name[i] not in self.items) or results.confidence[i] < 0.5:
-                    continue
-                obj = Detection2D()
-                obj.header = data.header
-                obj_hypothesis = ObjectHypothesisWithPose()
-                obj_hypothesis.id = int(self.obj_id[results.name[i]])
-                obj_hypothesis.score = results.confidence[i]
-                obj.results.append(obj_hypothesis)
-                obj.bbox.size_y = int(results.size_y[i])
-                obj.bbox.size_x = int(results.size_x[i])
-                obj.bbox.center.x = int(results.x[i])
-                obj.bbox.center.y = int(results.y[i])
-                objArray.detections.append(obj)
-        except:
-            img_bgr = image
-        self.object_pub.publish(objArray)
-        img = cv2.cvtColor(img_bgr, cv2.COLOR_RGB2BGR)
+            boxes = self.detector.detect(image)
+        except Exception as e:
+            rospy.logwarn_throttle(5.0, f">> [DETECTOR] inference exception: {e}")
+            boxes = []
+
+        published = 0
+        for box in boxes:
+            if box["name"] not in self.items:
+                continue
+            item_id = int(self.obj_id[box["name"]])
+            if item_id not in REPORTED_IDS:
+                continue
+            if box["score"] < self.publish_conf:
+                continue
+            obj = Detection2D()
+            obj.header = data.header
+            hypothesis = ObjectHypothesisWithPose()
+            hypothesis.id = item_id
+            hypothesis.score = float(box["score"])
+            obj.results.append(hypothesis)
+            obj.bbox.size_x = int(box["size_x"])
+            obj.bbox.size_y = int(box["size_y"])
+            obj.bbox.center.x = int(box["cx"])
+            obj.bbox.center.y = int(box["cy"])
+            obj_array.detections.append(obj)
+            published += 1
+
+        self.object_pub.publish(obj_array)
+
+        self._frame_count += 1
+        if self._frame_count % 50 == 1:
+            rospy.loginfo(f">> [DETECTOR] frame {self._frame_count}: "
+                          f"{published} object(s) published")
+
+        img_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         try:
-            image_out = self.bridge.cv2_to_imgmsg(img, "bgr8")
+            image_out = self.bridge.cv2_to_imgmsg(img_bgr, "bgr8")
+            image_out.header = data.header
+            self.image_pub.publish(image_out)
         except CvBridgeError as e:
-            rospy.logerr(e)
-        image_out.header = data.header
-        self.image_pub.publish(image_out)
-        
+            rospy.logwarn_throttle(5.0, f">> [DETECTOR] debug image bridge error: {e}")
 
-if __name__=='__main__':
+
+if __name__ == '__main__':
     rospy.init_node('detector_node')
-    obj=Detector()
+    rospy.loginfo(">> [DETECTOR] Node 'detector_node' starting ...")
+    obj = Detector()
+    rospy.loginfo(">> [DETECTOR] Node running, publishing /objects and /debug_image.")
     try:
         rospy.spin()
     except KeyboardInterrupt:

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Navigation bring-up for the Spark arena mission.
+#
+# DEPLOY: copy to ~/codes/nav_bringup.sh and `chmod +x` it. start_system.sh runs
+#         it automatically when it is executable, waits for the move_base node
+#         and warns if it does not appear.
+#
+# WHY THIS FILE EXISTS
+#   spark_bringup/driver_bringup.launch starts the chassis, the RealSense and the
+#   robot description but NOT the lidar and NOT the navigation stack. The vendor
+#   bundle does both inside auto_match.launch, which also starts its own
+#   detect_ros/runtask (and runtask under `xterm -e`, which fails without an X
+#   display). This script starts ONLY the navigation half, so it can be combined
+#   with start_system.sh without duplicates.
+#
+#   It launches exactly what auto_match.launch does in its `unless open_guide`
+#   group, minus the drivers, the detector and the mission node.
+#
+# VERIFIED ON THE ROBOT 2026-11-20 (read-only inspection):
+#   - /scan works: lidar_driver_transfer ydlidar_g6 -> YDLidar G6, 10 Hz
+#   - auto_match/config/test_map.yaml + mark_map.pkl (14 named waypoints) exist
+#   - mark_move.py only drives on a /mark_nav command, so starting it is inert
+
+set -o pipefail
+
+source /opt/ros/noetic/setup.bash || exit 1
+source "$HOME/spark_noetic/devel/setup.bash" || exit 1
+source "$HOME/spark_noetic/devel/setup.bash" || exit 1
+
+PKG="$(rospack find auto_match)" || { echo "auto_match package not found"; exit 1; }
+MAP="${MAP_FILE:-$PKG/config/test_map.yaml}"
+INIT_X="${INIT_X:-0.0}"
+INIT_Y="${INIT_Y:-0.0}"
+INIT_A="${INIT_A:--0.4}"   # matches auto_match.launch
+
+echo "[nav] map: $MAP"
+if [ ! -f "$MAP" ]; then
+    echo "[nav] ERROR: map file not found: $MAP"
+    exit 1
+fi
+
+# 1. Map server
+rosrun map_server map_server "$MAP" &
+
+# 2. Localisation (AMCL) on that map
+roslaunch "$PKG/config/amcl.launch.xml" \
+    initial_pose_x:="$INIT_X" initial_pose_y:="$INIT_Y" initial_pose_a:="$INIT_A" &
+
+# 3. Path planning / obstacle avoidance
+roslaunch "$PKG/config/move_base_param/move_base.launch.xml" \
+    custom_param_file:="$PKG/config/move_base_param/costmap_common_params.yaml" &
+
+# 4. The node runtask.py talks to: 'go <name>' / 'arrive <name>' on /mark_nav
+rosrun auto_match mark_move.py &
+
+echo "[nav] navigation stack requested (map_server, amcl, move_base, mark_move)"
+wait

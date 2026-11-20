@@ -16,7 +16,7 @@ if [ "${DASHBOARD_NO_AUTOSTART:-0}" != "1" ]; then
     rosnode list 2>/dev/null | grep -qx /detector_node || need_start=1
     if [ "$need_start" = "1" ]; then
         echo ">> Core services are down. Starting everything automatically..."
-        bash ~/semi/start_system.sh
+        bash ~/codes/start_system.sh
         sleep 1
     fi
 fi
@@ -35,6 +35,8 @@ while true; do
     pgrep -f "camera_stream.py" >/dev/null && echo "    [✓] Camera Stream :8080:    RUNNING" || echo "    [✗] Stream: STOPPED"
     pgrep -f "detect_ros.py" >/dev/null && echo "    [✓] Neural Network Detector: RUNNING" || echo "    [✗] Detector: STOPPED"
     pgrep -f "runtask.py" >/dev/null && echo "    [✓] Brain runtask:          RUNNING" || echo "    [✗] runtask: STOPPED"
+    rostopic list 2>/dev/null | grep -qx '/move_base/status' && echo "    [✓] Navigation move_base:   RUNNING" || echo "    [✗] Navigation: STOPPED (needs nav_bringup.sh)"
+    pgrep -f "rosbag record" >/dev/null && echo "    [✓] Mission bag recorder:   RUNNING (~/logs/bags)" || echo "    [~] Mission bag recorder:   stopped"
     echo "------------------------------------------------------"
     echo "  1) START ALL SYSTEMS (start_system.sh)"
     echo "  2) TEST CUBE GRASP (arm grasps cube and lifts)"
@@ -44,13 +46,14 @@ while true; do
     echo "  6) STOP ALL SYSTEMS (stop_system.sh)"
     echo "  7) DIAGNOSTICS & SYSTEM TEST (test_all_systems.sh)"
     echo "  8) VIEW DETECTOR LOG (~/logs/detect.log)"
+    echo "  9) MISSION BAGS (~/logs/bags) + STOP RECORDER"
     echo "  0) Exit to bash"
     echo "======================================================"
     read -p "Select action [0-8]: " choice
 
     case $choice in
         1)
-            bash ~/semi/start_system.sh
+            bash ~/codes/start_system.sh
             echo ""
             read -p "Press Enter to return to menu..."
             ;;
@@ -58,7 +61,7 @@ while true; do
             if ! pgrep -f "spark_base_server" > /dev/null || ! pgrep -f "detect_ros.py" > /dev/null || ! pgrep -f "pro_control_nomoveit" > /dev/null; then
                 echo ">> [WARNING] Required subsystems are not running!"
                 echo ">> Auto-starting base, camera, detector and arm via start_system.sh..."
-                bash ~/semi/start_system.sh
+                bash ~/codes/start_system.sh
                 echo ">> Waiting 4s for neural network to warm up..."
                 sleep 4
             fi
@@ -94,19 +97,19 @@ while true; do
         4)
             trap - INT  # Restore Ctrl+C for teleoperation
             # Auto-detect newest teleoperation script:
-            TELEOP_SCRIPT=$(ls -t ~/semi/key*.py ~/semi/*teleop*.py 2>/dev/null | head -n 1)
+            TELEOP_SCRIPT=$(ls -t ~/codes/key*.py ~/codes/*teleop*.py 2>/dev/null | head -n 1)
             if [ -n "$TELEOP_SCRIPT" ] && [ -f "$TELEOP_SCRIPT" ]; then
                 echo "Launching teleoperation script: $TELEOP_SCRIPT"
                 python3 "$TELEOP_SCRIPT"
             else
-                echo "Teleoperation script not found in ~/semi/. Place key*.py or *teleop*.py"
+                echo "Teleoperation script not found in ~/codes/. Place key*.py or *teleop*.py"
                 sleep 2
             fi
             ;;
         5)
             trap - INT
-            if [ -f ~/semi/view_log.py ]; then
-                python3 ~/semi/view_log.py
+            if [ -f ~/codes/view_log.py ]; then
+                python3 ~/codes/view_log.py
             else
                 echo ">> Viewing live log. Press Ctrl+C to return to menu:"
                 tail -n 25 -f ~/logs/runtask.log
@@ -114,12 +117,12 @@ while true; do
             trap '' INT
             ;;
         6)
-            bash ~/semi/stop_system.sh
+            bash ~/codes/stop_system.sh
             echo ""
             read -p "Press Enter to return to menu..."
             ;;
         7)
-            bash ~/semi/test_all_systems.sh
+            bash ~/codes/test_all_systems.sh
             echo ""
             read -p "Press Enter to return to menu..."
             ;;
@@ -128,6 +131,24 @@ while true; do
             echo ">> Showing last 30 lines of detect.log (Ctrl+C to return):"
             tail -n 30 -f ~/logs/detect.log
             trap '' INT
+            ;;
+        9)
+            echo ">> Mission bags in ~/logs/bags:"
+            ls -lh ~/logs/bags 2>/dev/null || echo "   (no bags recorded yet)"
+            echo ""
+            if pgrep -f "rosbag record" >/dev/null; then
+                read -p "Stop the recorder now (the bag is closed cleanly)? [y/N] " ans
+                if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
+                    pkill -INT -f "rosbag record" 2>/dev/null
+                    sleep 2
+                    pkill -f "rosbag record" 2>/dev/null
+                    echo ">> Recorder stopped."
+                fi
+            else
+                echo ">> Recorder is not running (start it with option 1)."
+            fi
+            echo ""
+            read -p "Press Enter to return to menu..."
             ;;
         0)
             trap - INT

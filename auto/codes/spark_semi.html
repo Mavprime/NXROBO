@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Spark Semi-Auto - Boot &amp; Run</title>
+<style>
+  body { font-family: sans-serif; max-width: 900px; margin: 2em auto; line-height: 1.5; }
+  h1 { border-bottom: 2px solid #333; padding-bottom: .3em; }
+  h2 { margin-top: 1.8em; border-bottom: 1px solid #ccc; padding-bottom: .2em; }
+  h3 { margin-top: 1.2em; }
+  pre { background: #f2f2f2; padding: .8em; overflow-x: auto; }
+  code { background: #f2f2f2; padding: 0 .2em; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid #ccc; padding: .3em .6em; text-align: left; }
+  .note { background: #fff8e1; padding: .7em; border-left: 4px solid #f0c000; }
+  .warn { background: #ffebee; padding: .7em; border-left: 4px solid #d32f2f; }
+</style>
+</head>
+<body>
+
+<h1>Spark Semi-Auto - Boot &amp; Run</h1>
+<p>This board is the M-Robots / OpenHarmony Spark. Its ROS Noetic install lives in
+<code>/data/local/release</code>, and every ROS command goes through the
+<code>/system/bin/run</code> wrapper, which sets <code>PATH</code>, <code>LD_LIBRARY_PATH</code>,
+<code>PYTHONPATH</code> and the <code>ROS_*</code> variables. There is <strong>no</strong>
+<code>spark_noetic</code> and no <code>source setup.bash</code> on this board - that is the other
+(Ubuntu) Spark.</p>
+<p>Code on the board lives in <code>/data/local/codes/</code>. <code>/</code> is a read-only
+filesystem, so <code>~/codes</code> (= <code>/codes</code>) cannot be created. SSH user
+<code>root</code>, password <code>123456</code>.</p>
+
+<h2>Order of operations</h2>
+<table>
+  <tr><th>#</th><th>Where</th><th>What</th></tr>
+  <tr><td>1</td><td>robot</td><td>Power on, wait for Wi-Fi</td></tr>
+  <tr><td>2</td><td>PC</td><td>Find the board's IP (DHCP - it changes)</td></tr>
+  <tr><td>3</td><td>PC</td><td>Upload <code>codes/</code> if they changed</td></tr>
+  <tr><td>4</td><td>robot, terminal 1</td><td>Start the server (master + drivers)</td></tr>
+  <tr><td>5</td><td>robot, terminal 2</td><td>Run the Python script</td></tr>
+  <tr><td>6</td><td>robot</td><td>Verify / stop</td></tr>
+</table>
+
+<h2>1. Find the board's IP</h2>
+<p>On the robot (screen or existing shell):</p>
+<pre>ifconfig wlan0</pre>
+<p>Or from your PC with the USB cable connected - no IP needed:</p>
+<pre>~/bin/hdc shell ifconfig</pre>
+<p>Read the <code>inet addr</code> on <code>wlan0</code>. The address is DHCP, so re-check after
+every boot instead of reusing the old one.</p>
+
+<h2>2. Upload new scripts (from your PC)</h2>
+<p><code>rsync</code> is not installed on the board and <code>~/codes</code> does not exist, so the
+usual <code>rsync ... root@ip:~/codes/</code> fails. Use hdc over USB.</p>
+<p><strong>First create the directory on the board</strong> - hdc does not create it, and without it
+every send fails with <code>[Fail]Error opening file: no such file or directory</code>:</p>
+<pre>~/bin/hdc shell 'mkdir -p /data/local/codes'</pre>
+<p>Then copy the files (from your PC):</p>
+<pre>cd "/home/mav/Documents/Extra/ROS Comp/codes"
+for f in *.py *.launch spark; do ~/bin/hdc file send "$PWD/$f" "/data/local/codes/$f"; done</pre>
+<div class="note">
+<p><code>~/bin/hdc</code> is the Linux hdc from the OpenHarmony 5.0.0 SDK. It needs the udev rule
+<code>/etc/udev/rules.d/50-hdc.rules</code> (<code>SUBSYSTEM=="usb", ATTRS{idVendor}=="2207",
+MODE="0666"</code>) and <code>~/bin/libusb_shared.so</code> next to it. Check with
+<code>~/bin/hdc list targets</code>; the device appears as
+<code>2207:5000 Rockchip "HDC Device"</code>.</p>
+</div>
+
+<h2>3. Terminal 1 - ON THE SPARK (server: master + base + arm)</h2>
+<pre>ssh root@&lt;robot-ip&gt;</pre>
+<p>Once on the board:</p>
+<pre>run roslaunch /data/local/codes/server.launch</pre>
+<p>This starts <code>rosmaster</code>, <code>spark_base_node</code>,
+<code>swiftpro_write_node</code> and <code>swiftpro_rviz_node</code>. It does <strong>not</strong>
+start the camera or the lidar.</p>
+<div class="warn">
+<p><strong>Leave this terminal open.</strong> Closing it stops the master and every driver.</p>
+</div>
+
+<h3>Alternative - detached (survives logout / Wi-Fi drop)</h3>
+<pre>run nohup setsid roslaunch /data/local/codes/server.launch \
+  &gt; /data/local/codes/server.log 2&gt;&amp;1 &lt; /dev/null &amp;</pre>
+<p>Check it came up:</p>
+<pre>run rosnode list</pre>
+
+<h2>4. Terminal 2 - ON THE SPARK (run your program)</h2>
+<p>Open a <strong>second</strong> SSH window to the board, then run exactly one script:</p>
+<pre># arm only (attaches motors, resumes last pose)
+run python3 /data/local/codes/arm.py
+
+# base only
+run python3 /data/local/codes/body.py
+
+# base + arm + pump
+run python3 /data/local/codes/key_fullbody.py</pre>
+<p>Plain <code>python3</code> will not find <code>rospy</code> - <code>run</code> is mandatory.
+If your shell reports <code>run: inaccessible or not found</code>, use the full path
+<code>/system/bin/run ...</code>.</p>
+<div class="note">
+<p>Keyboard scripts need a real interactive terminal (they put the TTY in raw mode). Do not start
+them detached or with output redirected. Do not run two teleop scripts at once.</p>
+</div>
+
+<h2>5. Verify</h2>
+<pre>run rosnode list                        # spark_base_server, swiftpro_write_node, swiftpro_rviz_node
+run rostopic hz /SwiftproState_topic    # ~20 Hz after the arm has been commanded
+run rostopic info /cmd_vel              # base subscriber present</pre>
+<p>The arm publishes <code>/SwiftproState_topic</code> only after it receives a command, so a silent
+topic while idle is normal. If the arm accepts keys but never moves, press <code>A</code>: the motors
+are detached at power-on and the script re-sends the attach sequence.</p>
+<p>Devices on the board:</p>
+<pre>ls -l /dev/ttyACM0     # arm (swiftpro) - must exist
+ls -l /dev/sparkBase   # base - symlink to ttyUSB0</pre>
+
+<h2>6. Stop</h2>
+<pre># in the teleop window: Ctrl+C
+
+# stop the server:
+run pkill -f server.launch
+
+# or, if you started it detached, the same command works; check with:
+run ps -ef | grep roslaunch</pre>
+
+<h2>Camera / lidar scripts</h2>
+<p><code>blue_detect.py</code>, <code>camera_stream.py</code>, <code>blue_view.py</code> and
+<code>touch_blue.py</code> need the camera, which <code>server.launch</code> does not start. Check
+the available launches first:</p>
+<pre>run rospack find spark_bringup
+run ls /data/local/release/usr/share/spark_bringup/launch</pre>
+<p>Then start the bringup instead of <code>server.launch</code> and run the script in a second
+terminal as above.</p>
+
+<h2>For the full competition stack</h2>
+<p>The vendor stack (base, arm, camera, lidar, detection, grasp, rviz, VNC) is started by the menu
+script, not by <code>server.launch</code>:</p>
+<pre>cd /data/local/release
+./onekey.sh        # choose the semi-auto option in the menu</pre>
+<p>Use <code>server.launch</code> when you only need base + arm for an arm/teleop test.</p>
+
+</body>
+</html>

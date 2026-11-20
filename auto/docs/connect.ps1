@@ -36,7 +36,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "`n>> [2/2] Entering interactive robot dashboard..." -ForegroundColor Cyan
 Write-Host "--------------------------------------------------------------" -ForegroundColor DarkGray
 
-ssh -t "spark@${IP}" "bash -ic '~/semi/dashboard.sh'"
+ssh -t "spark@${IP}" "bash -ic '~/codes/dashboard.sh'"
 
 Write-Host "`n--------------------------------------------------------------" -ForegroundColor DarkGray
 Write-Host "Control session ended." -ForegroundColor Yellow

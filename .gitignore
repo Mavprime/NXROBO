@@ -14,6 +14,10 @@ MobaXterm/
 *.msi
 *.exe
 
+# ...except the hand-eye calibration matrix: without it the grasp path falls
+# back to the old (broken) TRANSFORM_3D and misses every cube.
+!auto/codes/transform_3d.dat
+
 # Backup files
 *_backup.py
 *.bak
