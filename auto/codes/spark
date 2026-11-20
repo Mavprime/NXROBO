@@ -1,28 +1,35 @@
 #!/usr/bin/env bash
-# spark - run a script from ~/semi, bringing up only what it needs.
+# spark - run a script from ~/auto/codes, bringing up only what it needs.
 #
-#   ~/semi/spark key_fullbody.py         # base + arm, then the script
-#   ~/semi/spark --camera touch_blue.py  # base + camera + lidar + arm, then the script
-#   ~/semi/spark --status                # what is running right now
-#   ~/semi/spark --stop                  # stop the stack this wrapper starts
+#   ~/auto/codes/spark key_fullbody.py         # base + arm, then the script
+#   ~/auto/codes/spark --camera touch_blue.py  # base + camera + lidar + arm, then the script
+#   ~/auto/codes/spark --status                # what is running right now
+#   ~/auto/codes/spark --stop                  # stop the stack this wrapper starts
 #
 # The stack is started once, detached (setsid), and reused by later runs.
 # Log: ~/server.log
-#   default : ~/semi/server.launch             (base + uArm)
+#   default : ~/auto/codes/server.launch             (base + uArm)
 #   --camera: driver_bringup.launch + uArm     (base + RealSense + lidar + uArm)
 #
 # Override the launch files if needed:
 #   SPARK_LAUNCH=...  SPARK_BRINGUP="pkg file.launch arg:=value"
 
-set -u
 ROS_SETUP=$HOME/spark_noetic/devel/setup.bash
+set +u  # catkin's setup.bash is not nounset-safe
+# Hide the script's arguments while sourcing: catkin's setup.sh treats $@ as
+# its own flags (--extend etc.) and prints usage instead of setting ROS paths.
+_spark_args=("$@")
+set --
 if [ -r "$ROS_SETUP" ]; then
   source "$ROS_SETUP"
 else
   echo "[spark] warning: $ROS_SETUP not found (run this on the robot)" >&2
 fi
+set -- "${_spark_args[@]}"
+unset _spark_args
+set -u
 
-LAUNCH=${SPARK_LAUNCH:-$HOME/semi/server.launch}
+LAUNCH=${SPARK_LAUNCH:-$HOME/auto/codes/server.launch}
 BRINGUP=${SPARK_BRINGUP:-spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6}
 LOG=$HOME/server.log
 
@@ -64,7 +71,7 @@ start_stack() {
     if [ "$CAMERA" = 1 ] && ! camera_up; then
       echo "[spark] the ROS master is up but the camera is not." >&2
       echo "[spark] stop the current stack and rerun with --camera:" >&2
-      echo "        ~/semi/spark --stop && ~/semi/spark --camera <script>.py" >&2
+      echo "        ~/auto/codes/spark --stop && ~/auto/codes/spark --camera <script>.py" >&2
       exit 1
     fi
     ensure_arm
@@ -108,6 +115,6 @@ case ${1:-} in
     start_stack || exit 1
     script=$1
     shift
-    exec python3 "$HOME/semi/$script" "$@"
+    exec python3 "$HOME/auto/codes/$script" "$@"
     ;;
 esac

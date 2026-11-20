@@ -2,142 +2,33 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Spark Robot - Quick Commands</title>
+<title>Spark Robot - Commands</title>
 <style>
   body { font-family: sans-serif; max-width: 900px; margin: 2em auto; line-height: 1.5; }
   h1 { border-bottom: 2px solid #333; padding-bottom: .3em; }
   h2 { margin-top: 1.6em; border-bottom: 1px solid #ccc; padding-bottom: .2em; }
   pre { background: #f2f2f2; padding: .8em; overflow-x: auto; }
   code { background: #f2f2f2; padding: 0 .2em; }
-  table { border-collapse: collapse; margin: .6em 0; }
-  th, td { border: 1px solid #ccc; padding: .3em .6em; text-align: left; vertical-align: top; }
   .note { background: #fff8e1; padding: .7em; border-left: 4px solid #f0c000; }
-  .warn { background: #ffebee; padding: .7em; border-left: 4px solid #d32f2f; }
 </style>
 </head>
 <body>
 
-<h1>Spark Robot - Quick Commands</h1>
-<p>One command now starts whatever the script needs. You no longer keep a server terminal open and
-open a second terminal for the script: <code>~/semi/spark</code> starts the ROS stack once in the
-background (detached, survives logout) and reuses it on later runs.</p>
+<h1>Spark Robot - Commands</h1>
+<p>Two terminals on the robot: <strong>T1</strong> starts ROS and the hardware drivers, <strong>T2</strong>
+runs <code>~/auto/codes/body.py</code>. Keep T1 open while T2 is running.</p>
 
-<h2>1. Which robot, which folder</h2>
-<table>
-<tr><th>Local folder</th><th>What it is</th><th>Where it runs on the robot</th></tr>
-<tr><td><code>semi/</code></td><td>Manual / teleop scripts (arm, body, keyboard, blue-box tools)</td><td><code>~/semi/</code></td></tr>
-<tr><td><code>auto/</code></td><td>Full-auto release (FSM, detector, dashboard, logs)</td><td><code>~/semi/</code> + <code>~/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/</code></td></tr>
-<tr><td><code>Manuals/</code></td><td>Rules, configuration, competition material packs</td><td>PC only</td></tr>
-</table>
-<div class="note">
-<p><strong>This document is for the Ubuntu Spark</strong> (user <code>spark</code>, password
-<code>simple2026</code>, ROS Noetic in <code>~/spark_noetic</code>).</p>
-<p>The <strong>M-Robots / OpenHarmony board</strong> is a different machine: user <code>root</code>,
-password <code>123456</code>, code in <code>/data/local/codes</code>, and every ROS command needs the
-<code>run</code> wrapper. Use <code>semi/docs/spark_semi.html</code> for that board.</p>
-</div>
+<h2>T1 - server (keep it open)</h2>
+<pre>source ~/spark_noetic/devel/setup.bash
+roslaunch ~/auto/codes/server.launch</pre>
+<p>Starts the ROS master, the base driver and the uArm. Closing this terminal stops the master and
+every driver.</p>
 
-<h2>2. Run any script in ONE terminal</h2>
-<pre>~/semi/spark &lt;script&gt;.py</pre>
-<p>The wrapper source-loads the ROS environment, starts <code>~/semi/server.launch</code>
-(base + uArm) if the master is not up, then runs the script. Later runs see the master already
-running and start nothing twice.</p>
-
-<table>
-<tr><th>Command</th><th>What it does</th></tr>
-<tr><td><code>~/semi/spark key_fullbody.py</code></td><td>Keyboard drive: base + arm + pump</td></tr>
-<tr><td><code>~/semi/spark arm.py</code></td><td>Arm-only keyboard teleop</td></tr>
-<tr><td><code>~/semi/spark body.py</code></td><td>Base-only keyboard teleop</td></tr>
-<tr><td><code>~/semi/spark arm_move.py --home</code></td><td>Move the arm to an absolute pose</td></tr>
-<tr><td><code>~/semi/spark pump_test.py</code></td><td>Vacuum pump on/off test</td></tr>
-<tr><td><code>~/semi/spark --camera blue_detect.py</code></td><td>Blue-box detector (needs the camera)</td></tr>
-<tr><td><code>~/semi/spark --camera touch_blue.py</code></td><td>Camera + arm: touch the top of the blue box</td></tr>
-<tr><td><code>~/semi/spark --camera camera_stream.py</code></td><td>Web stream on <code>http://&lt;robot-ip&gt;:8080/</code></td></tr>
-<tr><td><code>~/semi/spark --status</code></td><td>Show the running ROS nodes</td></tr>
-<tr><td><code>~/semi/spark --stop</code></td><td>Stop the base / camera / arm launches</td></tr>
-</table>
-
-<p><code>--camera</code> starts the full bringup instead of <code>server.launch</code>:</p>
-<pre>roslaunch spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6
-roslaunch swiftpro pro_control_nomoveit.launch</pre>
-<p>i.e. base + RealSense D435 + YDLidar + uArm. If a stack without the camera is already running,
-the wrapper refuses and tells you to run <code>~/semi/spark --stop</code> first — that is deliberate,
-starting a second base driver on the same serial port only produces errors.</p>
-
-<div class="note">
-<p><strong>Log:</strong> the detached stack writes to <code>~/server.log</code>.
-Follow it with <code>tail -f ~/server.log</code>. The wrapper waits until the master (and, with
-<code>--camera</code>, the camera topic) is actually up before it starts your script.</p>
-</div>
-
-<h2>3. Full-auto match in one command</h2>
-<pre>~/semi/start_system.sh</pre>
-<p>Starts everything in the background: base, RealSense, lidar, uArm, web stream, YOLO detector and
-<code>runtask.py</code>. Logs go to <code>~/logs/</code> (<code>base.log</code>, <code>arm.log</code>,
-<code>detect.log</code>, <code>runtask.log</code>, <code>stream.log</code>).</p>
-
-<pre># start the task
-rostopic pub -1 /task_start_flag std_msgs/String "1"
-
-# abort the task
-rostopic pub -1 /task_start_flag std_msgs/String "0"
-
-# stop every subsystem
-~/semi/stop_system.sh</pre>
-
-<p>Prefer a menu? <code>~/semi/dashboard.sh</code> gives you options 1-7 (start, grasp test,
-release test, teleop, live log, stop). On Windows, <code>START_ROBOT.bat</code> connects and opens
-it for you.</p>
-
-<h2>4. Copy code to the robot (from your PC)</h2>
-<p>Manual scripts &rarr; <code>~/semi</code>:</p>
-<pre>rsync -av --exclude='__pycache__/' semi/ spark@&lt;robot-ip&gt;:~/semi/</pre>
-<p>Full-auto nodes &rarr; the ROS package, everything else &rarr; <code>~/semi</code> (this is what
-<code>upload.ps1</code> does on Windows):</p>
-<pre>scp auto/codes/runtask.py auto/codes/detect_ros.py \
-    spark@&lt;robot-ip&gt;:~/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/
-
-rsync -av auto/codes/ spark@&lt;robot-ip&gt;:~/semi/</pre>
-<p>Keep the trailing slash on the source: it copies the folder's <em>contents</em>; without it you
-get a nested <code>semi/semi</code>.</p>
-
-<div class="note">
-<p>No <code>rsync</code> on the PC? Use <code>scp -r "&lt;local-dir&gt;" &lt;user&gt;@&lt;robot-ip&gt;:&lt;remote-dir&gt;</code>.</p>
-</div>
-
-<h2>5. Fallback: manual two-terminal start</h2>
-<p>Use this only if <code>~/semi/spark</code> is missing or fails (e.g. you copied only a few files).</p>
-<pre># Terminal 1 - keep it open
-source ~/spark_noetic/devel/setup.bash
-roslaunch ~/semi/server.launch
-
-# Terminal 2
-source ~/spark_noetic/devel/setup.bash
-python3 ~/semi/&lt;script&gt;.py</pre>
-<p>Keep terminal 1 running; closing it stops the master and every driver. To detach it instead:</p>
-<pre>setsid nohup roslaunch ~/semi/server.launch &gt; ~/server.log 2&gt;&amp;1 &lt; /dev/null &amp;</pre>
-
-<h2>6. Before you run anything</h2>
-<pre>ls -l /dev/sparkBase      # base serial
-ls -l /dev/ttyACM*        # arm serial (expect /dev/ttyACM0)</pre>
-<p>If the arm device is missing, reconnect or power it. Without <code>/dev/ttyACM0</code> the arm
-driver reports <code>Unable to open port</code>.</p>
-
-<h2>7. Verify</h2>
-<pre>~/semi/spark --status                 # nodes: /spark_base_server, /swiftpro_write_node
-rostopic hz /SwiftproState_topic      # arm: about 20 Hz
-rostopic info /cmd_vel                # base: one subscriber
-rostopic list | grep camera           # camera topics (only with --camera)</pre>
-
-<h2>8. Troubleshooting</h2>
-<table>
-<tr><th>Symptom</th><th>Fix</th></tr>
-<tr><td><code>Unable to register with master</code></td><td>The ROS master is down. Run any command through <code>~/semi/spark</code> (it starts the master) or start <code>server.launch</code>.</td></tr>
-<tr><td><code>the ROS master is up but the camera is not</code></td><td><code>~/semi/spark --stop</code>, then rerun with <code>--camera</code>.</td></tr>
-<tr><td><code>Unable to open port</code> (arm)</td><td>Reconnect the arm USB; check <code>ls -l /dev/ttyACM*</code>.</td></tr>
-<tr><td>Base refuses to move</td><td><code>rostopic echo -n 1 /spark_base/sensor</code> — if <code>ir_bumper_right: True</code> with nothing in front, power-cycle the robot.</td></tr>
-<tr><td>Nothing at <code>http://&lt;ip&gt;:8080/</code></td><td>The stream starts with <code>start_system.sh</code>, or run <code>~/semi/spark --camera camera_stream.py</code>.</td></tr>
-</table>
+<h2>T2 - body.py</h2>
+<pre>source ~/spark_noetic/devel/setup.bash
+python3 ~/auto/codes/body.py</pre>
+<p>Base-only keyboard teleop: <code>w</code>/<code>s</code> drive forward/back, <code>a</code>/<code>d</code>
+turn. <code>Ctrl+C</code> stops the base; the server in T1 keeps running.</p>
 
 </body>
 </html>
