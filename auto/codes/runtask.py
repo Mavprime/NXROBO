@@ -1,53 +1,62 @@
 #!/usr/bin/python3
 
-import sys
+import math
+import hashlib
+import json
 import os
-import yaml
-import _thread
-import threading
-import pickle
 import struct
+import threading
+import time
+from collections import Counter, deque
 
 import numpy as np
+import yaml
 
 import rospy
 import rospkg
 import actionlib
-from actionlib_msgs.msg import *
-from move_base_msgs.msg import MoveBaseActionResult, MoveBaseResult
+from actionlib_msgs.msg import GoalID, GoalStatus
+from move_base_msgs.msg import MoveBaseActionResult
 import common.msg
 import common.srv
 from common.msg import MoveStraightDistanceAction, TurnBodyDegreeAction
-# import common.action
 import swiftpro.msg
 from std_msgs.msg import String
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import PointCloud2
 from swiftpro.msg import position
 from vision_msgs.msg import Detection2DArray
-import tf
-import tf.transformations as tf_transformations
-from collections import Counter
 
-# Class ID Normalizer (Temporal Voting & ID Mapping).
-# YOLO emits both the item class and its printed face ("<item>_site"), so each
-# _site alias must map to ITS OWN item (see auto_match/config/items_config.yaml):
-#   bear 1, bear_site 10   -> 1
-#   wine 2, wine_site 20   -> 2
-#   clock 3, clock_site 30 -> 3
-#   banana 4, banana_site 40 -> 4
-ID_MAP = {
-    1: 1, 10: 1,
-    2: 2, 20: 2,
-    3: 3, 30: 3,
-    4: 4, 40: 4,
-}
+import match_logic
+from match_logic import (
+    CAKE_ID, CONF_THRESHOLD, CLUSTER_DIST_PX, DEFAULT_MAPPING, MatchClock,
+    MAX_TIER, TOTAL_CUBES, ZONES_BCD, check_transform, decode_classification_board,
+    expand_aliases, ik_reachable, norm_id, pad_projection_error,
+    parse_task_command, pixel_to_cake_xy, project_arm,
+)
 
-def norm_id(raw_id):
-    try:
-        return ID_MAP.get(int(raw_id), int(raw_id))
-    except Exception:
-        return raw_id
+# --------------------------------------------------------------------------
+# Robot-specific constants (everything rule-related lives in match_logic.py)
+# --------------------------------------------------------------------------
+
+#: Frames of ``/objects`` used for the grasp-grade majority vote. The detector
+#: runs two YOLO models and publishes as fast as the NUC allows, so a four
+#: frame window is ~0.3-1 s and still removes one-frame ghosts.
+GRASP_FRAMES = 4
+#: Frames used while reading the classification board (slow, it can wait).
+BOARD_FRAMES = 12
+#: Give up on a station after this many empty scans (never spin forever).
+MAX_EMPTY_ATTEMPTS = 2
+#: Picks the mission plans per sorting station.
+STATION_PICKS = 2
+#: Sorting station that holds the tier-2 cake pedestal. Verify on the arena.
+CAKE_SORTING_STATION = "Sorting_M"
+#: Match budget: drop dead at 540 s so the 600 s match is never exceeded.
+TASK_TIME_BUDGET_S = 540.0
+#: Pause after navigation before scanning, so the chassis stops vibrating.
+SETTLE_S = 1.0
+
+ARM_TUCK_POSE = (50.0, 180.0, 160.0)
 
 # Affine transform from the uArm wrist coordinates (mm) to the RealSense
 # camera frame (metres):  cam = [x, y, z, 1] @ TRANSFORM_3D
@@ -68,6 +77,11 @@ TRANSFORM_3D = np.array([
 # object/floor and the open-loop steppers skip steps.
 PAD_THICKNESS_MM = 8.0
 
+#: Smallest orange-pad blob accepted by the calibration self-check.  A blob
+#: clipped by the arm or the image border still has a centroid, but a biased
+#: one; one such point once dragged a calibration fit from 1.1 to 3.1 px.
+PAD_MIN_AREA = 400.0
+
 # Hard software floor.  Below this the linkage/pad presses on the floor and
 # the steppers lose position; never command the wrist lower than this.
 SAFE_MIN_Z = -120.0
@@ -78,49 +92,6 @@ CAM_FX = 605.6860961914062
 CAM_FY = 605.8469848632812
 CAM_CX = 315.03875732421875
 CAM_CY = 249.8477020263672
-
-import math
-
-MATH_TRANS = 57.2958
-MATH_L1 = 106.6
-MATH_L2 = 13.2
-MATH_LOWER_ARM = 142.07
-MATH_UPPER_ARM = 158.81
-MATH_UPPER_LOWER = MATH_UPPER_ARM / MATH_LOWER_ARM
-
-def ik_reachable(x, y, z):
-    '''Check geometric IK reachability of point (x, y, z) in mm for uArm Swift Pro.'''
-    try:
-        z = z + 74.55
-        z_in = (z - MATH_L1) / MATH_LOWER_ARM
-        if x < 0.1:
-            x = 0.1
-        if y == 0:
-            rot = 90.0
-        elif y < 0:
-            rot = -math.atan(x / y) * MATH_TRANS
-        else:
-            rot = 180.0 - math.atan(x / y) * MATH_TRANS
-
-        sin_rot = math.sin(rot / MATH_TRANS)
-        if sin_rot == 0:
-            return False
-
-        x_in = (x / sin_rot - MATH_L2 - 56.55) / MATH_LOWER_ARM
-        if x_in == 0:
-            return False
-
-        sqrt_zx = math.sqrt(z_in * z_in + x_in * x_in)
-        if sqrt_zx == 0:
-            return False
-
-        upper = MATH_UPPER_LOWER
-        right_all = (sqrt_zx * sqrt_zx + upper * upper - 1) / (2 * upper * sqrt_zx)
-        left_all = (sqrt_zx * sqrt_zx + 1 - upper * upper) / (2 * sqrt_zx)
-        return abs(right_all) <= 1 and abs(left_all) <= 1
-    except Exception:
-        return False
-
 
 
 class SwiftProInterface:
@@ -163,32 +134,29 @@ class SwiftProInterface:
 
 class CamAction:
     def __init__(self):
-        # Load competition items configuration
-        rospack = rospkg.RosPack()
-        package_path = os.path.join(rospack.get_path('auto_match'))
-        items_path = os.path.join(package_path, 'config', 'items_config.yaml')
+        # Load the competition item configuration.  A missing file is reported
+        # but no longer fatal: the FSM works on canonical ids 1..4, and the old
+        # sys.exit() killed the node halfway through startup.
+        self.search_id = []
         try:
+            package_path = rospkg.RosPack().get_path('auto_match')
+            items_path = os.path.join(package_path, 'config', 'items_config.yaml')
             with open(items_path, "r", encoding="utf8") as f:
                 items_content = yaml.load(f.read(), Loader=yaml.FullLoader)
-        except Exception:
-            rospy.logerr("Cannot open items_config.yaml")
-            sys.exit(1)
-        if isinstance(items_content, type(None)):
-            rospy.logerr("items_config.yaml is empty")
-            sys.exit(1)
+            objects = items_content["objects"]
+            self.search_id = [items_content["items"][objects[name]] for name in
+                              ("objects_a", "objects_b", "objects_c", "objects_d")]
+            rospy.loginfo(f">> [VISION] items_config.yaml loaded, item ids: {self.search_id}")
+        except Exception as e:
+            rospy.logwarn(f">> [VISION] items_config.yaml unavailable ({e}); "
+                          f"working with canonical ids 1..4")
 
-        # Target item IDs from yaml
-        self.search_id = [
-            items_content["items"][items_content["objects"]["objects_a"]],
-            items_content["items"][items_content["objects"]["objects_b"]],
-            items_content["items"][items_content["objects"]["objects_c"]],
-            items_content["items"][items_content["objects"]["objects_d"]]
-        ]
-
-        self.latest_msg = None
-        self.latest_time = rospy.Time(0)
-        self.lock = threading.Lock()
-        self.sub = rospy.Subscriber("/objects", Detection2DArray, self._objects_cb, queue_size=1)
+        # Rolling buffer of (monotonic timestamp, frame) for temporal voting.
+        # A frame is a list of (raw_id, score, cx, cy) tuples.
+        self._frames = deque(maxlen=max(2, GRASP_FRAMES))
+        self._lock = threading.Lock()
+        self.sub = rospy.Subscriber(
+            "/objects", Detection2DArray, self._objects_cb, queue_size=5)
 
         # NOTE: the registered point cloud is ~10 MB/frame, so we do NOT keep
         # a 30 Hz subscriber (that ate a whole CPU core).  point3d() pulls one
@@ -196,21 +164,89 @@ class CamAction:
         self.transform3d = self._load_transform()
 
     def _load_transform(self):
-        '''Load a freshly calibrated 4x3 camera<-arm matrix if present.'''
+        '''Load, sanity-check and describe the camera<-arm matrix.
+
+        Sets ``self.calib_ok``.  When it is False the matrix cannot be trusted
+        at all, so AutoAction refuses to start the match instead of missing
+        every cube silently.  A matrix that is numerically fine but stale
+        (the camera was moved) cannot be detected here - that is what the
+        active pad check is for.
+        '''
         path = os.path.expanduser("~/transform_3d.dat")
+        source = path
+        matrix = None
         try:
-            t = np.load(path, allow_pickle=True)
-            if t.shape == (4, 3):
-                rospy.loginfo(f">> [DEPTH] Loaded 3D camera-arm transform from {path}")
-                return t
+            matrix = np.load(path, allow_pickle=True)
         except Exception:
-            pass
-        return TRANSFORM_3D
+            matrix = None
+        if matrix is None or getattr(matrix, "shape", None) != (4, 3):
+            source = "built-in TRANSFORM_3D"
+            matrix = TRANSFORM_3D
+            rospy.logwarn(">> [CALIB] %s missing or not 4x3: using %s. "
+                          "Run 'python3 -u ~/codes/calib3d.py'." % (path, source))
+
+        # Fingerprint of the file on disk: the metadata sidecar must describe
+        # THIS matrix, otherwise its check frame is meaningless.
+        self.calib_md5 = None
+        if source == path:
+            try:
+                with open(path, "rb") as handle:
+                    self.calib_md5 = hashlib.md5(handle.read()).hexdigest()
+            except Exception:
+                self.calib_md5 = None
+
+        ok, problems, stats = check_transform(matrix)
+        self.calib_problems = list(problems)
+        self.calib_ok = bool(ok)
+        if ok:
+            rospy.loginfo(">> [CALIB] matrix from %s: %.2f px/mm at the "
+                          "workspace, round-trip %.1f mm"
+                          % (source, stats.get("px_per_mm", 0.0),
+                             stats.get("roundtrip_mm", 0.0)))
+        else:
+            for problem in problems:
+                rospy.logerr(f">> [CALIB] {problem}")
+            rospy.logerr(">> [CALIB] camera->arm matrix is unusable; run "
+                         "'python3 -u ~/codes/calib3d.py'")
+
+        meta = self._read_calibration_meta()
+        self.calib_meta = meta
+        if meta:
+            rospy.loginfo(">> [CALIB] fitted %s from %s pose(s), leave-one-out "
+                          "max %.1f px / mean %.1f px"
+                          % (meta.get("created", "?"), meta.get("poses", "?"),
+                             float(meta.get("loo_max_px", 0.0)),
+                             float(meta.get("loo_mean_px", 0.0))))
+        elif source == path:
+            rospy.logwarn(">> [CALIB] no calibration metadata next to %s: "
+                          "age and residuals unknown. Re-run calib3d.py after "
+                          "moving the camera." % path)
+        return matrix
+
+    @staticmethod
+    def _read_calibration_meta():
+        '''Metadata written by calib3d.py next to the matrix, or None.'''
+        path = os.path.expanduser("~/transform_3d.meta.json")
+        try:
+            with open(path, "r", encoding="utf8") as handle:
+                return json.load(handle)
+        except Exception:
+            return None
 
     def _objects_cb(self, msg):
-        with self.lock:
-            self.latest_msg = msg
-            self.latest_time = rospy.Time.now()
+        '''Buffer one detection frame (possibly empty) for the voting window.'''
+        frame = []
+        for obj in msg.detections:
+            try:
+                result = obj.results[0]
+                frame.append((result.id,
+                              float(getattr(result, 'score', 1.0) or 0.0),
+                              float(obj.bbox.center.x),
+                              float(obj.bbox.center.y)))
+            except Exception:
+                continue
+        with self._lock:
+            self._frames.append((time.monotonic(), frame))
 
     def point3d(self, u, v, win=6):
         '''
@@ -307,45 +343,59 @@ class CamAction:
             y = min(max(y, -210.0), 210.0)
         return x, y
 
-    def detector(self, num_samples=1, timeout=3.0):
+    def detector(self, num_samples=None, timeout=3.0, conf_threshold=None):
         '''
-        Reliable object detection:
-        1. Checks fresh subscriber cache first (< 1.0s old)
-        2. Falls back to wait_for_message with generous 3.0s timeout
-        @return: list of [[target_id, [x, y, 0]], ...]
-        '''
-        msg = None
-        with self.lock:
-            if self.latest_msg is not None and (rospy.Time.now() - self.latest_time).to_sec() < 1.0:
-                msg = self.latest_msg
+        Majority-voted, spatially clustered cube list.
 
-        if msg is None:
+        Waits until ``num_samples`` detection frames have arrived *after this
+        call* (so a re-scan after a base rotation never uses pre-rotation
+        frames), then lets match_logic.cluster_detections() drop one-frame
+        ghosts, merge the two YOLO models reporting the same cube, and vote on
+        the class.
+
+        @return: list of [[canonical_id, [x, y, 0]], ...]
+        '''
+        wanted = max(1, int(GRASP_FRAMES if num_samples is None else num_samples))
+        started = time.monotonic()
+        deadline = started + max(0.0, float(timeout))
+        frames = []
+
+        while time.monotonic() < deadline:
+            with self._lock:
+                frames = [frame for stamp, frame in list(self._frames)
+                          if stamp >= started]
+            if len(frames) >= wanted:
+                break
+            rospy.sleep(0.05)
+
+        if not frames:
             try:
-                msg = rospy.wait_for_message("/objects", Detection2DArray, timeout=timeout)
+                msg = rospy.wait_for_message(
+                    "/objects", Detection2DArray, timeout=timeout)
             except Exception as e:
-                rospy.logerr(f">> [DETECTOR] No message on /objects ({e}). Check if detect_ros.py and camera driver are running! (Use option 1 in dashboard)")
+                rospy.logerr(f">> [DETECTOR] No message on /objects ({e}). "
+                             f"Check detect_ros.py and the camera driver "
+                             f"(dashboard option 1).")
                 return []
+            self._objects_cb(msg)
+            with self._lock:
+                frames = [frame for stamp, frame in list(self._frames)
+                          if stamp >= started]
 
-        cube_list = []
-        for obj in msg.detections:
-            raw_id = obj.results[0].id
-            cid = norm_id(raw_id)
-            score = obj.results[0].score if hasattr(obj.results[0], 'score') else 1.0
-
-            if score < 0.35:
-                continue
-
-            if cid in [1, 2, 3, 4] or raw_id in self.search_id:
-                x = int(round(obj.bbox.center.x))
-                y = int(round(obj.bbox.center.y))
-                target_id = cid if cid in [1, 2, 3, 4] else raw_id
-                cube_list.append([target_id, [x, y, 0]])
-
-        return cube_list
+        frames = frames[-wanted:]
+        thresh = CONF_THRESHOLD if conf_threshold is None else float(conf_threshold)
+        cubes = match_logic.cluster_detections(
+            frames, conf_threshold=thresh,
+            cluster_dist_px=CLUSTER_DIST_PX)
+        rospy.loginfo_throttle(
+            1.0, f">> [VISION] {len(cubes)} cube(s) from {len(frames)} frame(s): {cubes}")
+        return cubes
 
 class ArmAction:
-    def __init__(self):
-        self.cam = CamAction()
+    def __init__(self, cam=None):
+        # One camera node per process: runtask.py used to create a second
+        # CamAction here, doubling the /objects subscriber and the buffers.
+        self.cam = cam if cam is not None else CamAction()
 
         # Calibration data for Layer 1
         filename = os.environ['HOME'] + "/thefile.txt"
@@ -431,6 +481,19 @@ class ArmAction:
         z_lift = min(z_surface + 100.0, 165.0)
         return z_hover, z_touch, z_lift
 
+    def move_z_steps(self, x, y, z_from, z_to, steps=1, delay=0.8):
+        '''
+        Move vertically to target height. If steps <= 1, commands a single
+        smooth G0 motion. Multiple steps are kept as an optional fallback.
+        '''
+        steps = max(1, int(steps))
+        if steps <= 1:
+            self.interface.set_pose(x, y, z_to, delay=delay)
+            return
+        for i in range(1, steps + 1):
+            z = z_from + (z_to - z_from) * (float(i) / steps)
+            self.interface.set_pose(x, y, z, delay=delay)
+
     def turn_base(self, angle_rad):
         '''
         Turn robot base by angle_rad (radians) in place.
@@ -470,8 +533,8 @@ class ArmAction:
         if abs(dist_m) < 0.03:  # Less than 3 cm, no drive needed
             return
 
-        # Safe displacement clamp (max 10 cm per step)
-        dist_m = max(-0.10, min(0.10, dist_m))
+        # Safe displacement clamp (max 25 cm per step)
+        dist_m = max(-0.25, min(0.25, dist_m))
         lin_speed = 0.18  # Crisp 18 cm/s linear velocity
         lin_vel = lin_speed if dist_m > 0 else -lin_speed
         move_time = abs(dist_m) / lin_speed
@@ -507,108 +570,107 @@ class ArmAction:
            - Enable pump and hold vacuum (0.40s) to build strong negative pressure
            - Confident vertical lift upwards (+100 mm)
         '''
-
         # 1. Primary cube detection
-        cube_list = self.cam.detector(timeout=3.0)
+        cube_list = self.cam.detector(num_samples=6, timeout=3.0, conf_threshold=0.04)
         rospy.loginfo(f">> [GRASP] Cube detection: {cube_list}")
 
-        if len(cube_list) == 0:
+        if not cube_list:
             rospy.logwarn(">> [GRASP] Aborted: No target cubes detected in camera view.")
             self.grasp_status_pub.publish(String("1"))
             return 0
 
-        # Sort: choose cube closest to optical center line and arm workspace
-        cube_list.sort(key=lambda item: (abs(item[1][0] - 320) + (260 - item[1][1]) * 1.2))
-        target_cube = cube_list[0]
+        target_cube = match_logic.select_grasp_candidate(cube_list)
         target_id = target_cube[0]
+        if match_logic.is_cake(target_id):
+            rospy.loginfo(f">> [GRASP] Target ID {target_id} is CAKE -> routing to grasp1 (Layer 2)!")
+            return self.grasp1()
         initial_target_id = target_id
-        u = target_cube[1][0]
-        v = target_cube[1][1]
+        cu = target_cube[1][0]
+        cv = target_cube[1][1]
 
-        x, y, z_surface, src = self.target_from_pixel(u, v, self.x_kb, self.y_kb, -127.0, -160.0, 10.0)
-        z_hover, z_touch, z_lift = self.contact_heights(z_surface)
+        # Geometry for floor cube: top=-50 mm, cube height=100 mm -> center=-100 mm
+        z_center = -100.0
+        z_touch = -50.0
+        z_above = -15.0
+        z_lift = 60.0
 
-        # 2. Check: is cube ALREADY in reach of manipulator?
-        # uArm Swift Pro can grasp objects left and right (Y: -190..190 mm)
-        in_reach_x = (120.0 <= x <= 320.0)
-        in_reach_y = (-190.0 <= y <= 190.0)
-        ik_touch = self.is_in_arm_limit(x, y, z_touch)
-        ik_lift = self.is_in_arm_limit(x, y, z_lift)
-        can_reach_direct = in_reach_x and in_reach_y
-        if src != "3d":
-            # The analytical IK model is conservative at very low z; trust
-            # the measured 3D point when we have one.
-            can_reach_direct = can_reach_direct and ik_touch and ik_lift
+        xy = match_logic.pixel_to_xy_at_z(self.cam.transform3d, cu, cv, z_center)
+        if xy is None:
+            rospy.logerr(">> [GRASP] Degenerate projective mapping.")
+            self.grasp_status_pub.publish(String("1"))
+            return 0
+        x = xy[0] + 20.0  # +20 mm cup center correction
+        y = xy[1]
 
-        rospy.loginfo(f">> [GRASP] Target ID {target_id}: u={u}, v={v} -> x={x:.1f}, y={y:.1f}, z_surface={z_surface:.1f} ({src}) | reach_direct={can_reach_direct}")
+        # 2. Check: is cube in comfortable reach of the arm?
+        # Comfortable sweet-spot envelope: arm is not strained, lands dead center on cube
+        TARGET_X = 245.0
+        dist_to_cube = math.hypot(x, y)
+        in_reach = (160.0 <= x <= 265.0) and (abs(y) <= 85.0) and (dist_to_cube <= 270.0)
+        rospy.loginfo(f">> [GRASP] Target ID {target_id}: px=({cu:.0f}, {cv:.0f}) -> x={x:.1f}, y={y:.1f}, dist={dist_to_cube:.1f} | in_reach={in_reach}")
 
-        if can_reach_direct:
-            rospy.loginfo(f">> [GRASP] Cube already in arm workspace! Base NOT moving, grasping immediately.")
-        else:
-            # 3. If cube cannot be reached directly - adjust base position
-            rospy.loginfo(f">> [GRASP] Cube out of direct reach (x={x:.1f}, y={y:.1f}). Adjusting base...")
+        approach_step = 0
+        while approach_step < 3 and not in_reach:
+            approach_step += 1
+            rospy.loginfo(f">> [GRASP] Cube outside sweet spot (x={x:.1f}, y={y:.1f}, dist={dist_to_cube:.1f}). Approach step #{approach_step}...")
 
-            # Rotate base towards cube
-            delta_u = u - 320.0
-            if abs(delta_u) > 25.0:
-                angle_rad = -delta_u * 0.0019
-                rospy.loginfo(f">> [VISUAL-SERVO] Rotating base towards cube: {math.degrees(angle_rad):.1f} deg (u={u})...")
+            # (a) Turn base towards cube center
+            angle_rad = math.atan2(y, x)
+            if abs(angle_rad) > math.radians(2.0):
+                rospy.loginfo(f">> [GRASP] Turning base towards cube: {math.degrees(angle_rad):.1f} deg...")
                 self.turn_base(angle_rad)
+                rospy.sleep(0.3)
 
-            # Distance correction ONLY if strictly necessary (do not push cube!)
-            if x > 295.0:
-                drive_m = min(0.06, (x - 245.0) / 1000.0)
-                rospy.loginfo(f">> [VISUAL-SERVO] Cube far (x={x:.1f} mm). Driving forward {drive_m*100:.1f} cm...")
-                self.drive_base(drive_m)
-            elif x < 165.0:
-                rospy.loginfo(f">> [VISUAL-SERVO] Cube too close (x={x:.1f} mm). Backing up 4 cm...")
-                self.drive_base(-0.04)
+            # (b) Drive forward to bring cube into sweet spot X = 245 mm
+            drive_m = (dist_to_cube - TARGET_X) / 1000.0
+            if abs(drive_m) >= 0.02:
+                step_m = max(-0.25, min(0.25, drive_m))
+                rospy.loginfo(f">> [GRASP] Driving {step_m*100:.1f} cm to position cube at 24.5 cm...")
+                self.drive_base(step_m)
+                rospy.sleep(0.4)
 
-            # 4. RESCAN after base maneuver!
-            rospy.sleep(0.20)
+            # (c) ЗАТЕМ: запустить алгоритм сканирования позиции кубика еще раз!
+            rospy.loginfo(f">> [GRASP] Re-scanning cube position after approach step #{approach_step}...")
             rescan_list = self.cam.detector(timeout=3.0)
             if rescan_list:
-                # Keep the same object class we rotated towards; the YOLO head can
-                # flip classes between frames, and switching targets here would
-                # send the item to the wrong collection zone.
-                same_class = [it for it in rescan_list if it[0] == initial_target_id]
-                pool = same_class if same_class else rescan_list
-                pool.sort(key=lambda item: (abs(item[1][0] - 320) + (260 - item[1][1]) * 1.2))
-                target_cube = pool[0]
+                target_cube = match_logic.select_grasp_candidate(
+                    rescan_list, preferred_id=initial_target_id)
                 target_id = target_cube[0]
-                u = target_cube[1][0]
-                v = target_cube[1][1]
-                x, y, z_surface, src = self.target_from_pixel(u, v, self.x_kb, self.y_kb, -127.0, -160.0, 10.0)
-                z_hover, z_touch, z_lift = self.contact_heights(z_surface)
-                rospy.loginfo(f">> [GRASP] Exact target after rotation: u={u}, v={v} -> x={x:.1f}, y={y:.1f}, z_surface={z_surface:.1f} ({src})")
+                cu = target_cube[1][0]
+                cv = target_cube[1][1]
+                xy = match_logic.pixel_to_xy_at_z(self.cam.transform3d, cu, cv, z_center)
+                if xy is not None:
+                    x = xy[0] + 20.0
+                    y = xy[1]
+                    dist_to_cube = math.hypot(x, y)
+                    in_reach = (160.0 <= x <= 265.0) and (abs(y) <= 85.0) and (dist_to_cube <= 270.0)
+                    rospy.loginfo(f">> [GRASP] Re-scanned target: px=({cu:.0f}, {cv:.0f}) -> x={x:.1f}, y={y:.1f}, dist={dist_to_cube:.1f} | in_reach={in_reach}")
             else:
-                rospy.logwarn(">> [GRASP] Cube not detected after maneuver, using calculated coordinates.")
+                break
 
-        # 5. Execute physical grasp and lift with manipulator
-        # Clamp coordinates to safe operating limits
+        # 4. Execute physical grasp
         x = max(120.0, min(320.0, x))
         y = max(-190.0, min(190.0, y))
         rospy.loginfo(f">> [GRASP] Executing grasp for ID {target_id}: x={x:.1f}, y={y:.1f}, z_touch={z_touch:.1f}, z_lift={z_lift:.1f}")
 
-        # Energise the steppers (M17) before any motion after a driver restart.
         self.interface.set_status(True)
-        rospy.sleep(0.15)
+        rospy.sleep(0.20)
 
-        # Rapid approach above cube
-        self.interface.set_pose(x, y, z_hover, delay=0.35)
+        # Move above cube at safe height
+        self.interface.set_pose(x, y, z_above, delay=0.9)
 
         # Enable vacuum pump early for fast suction
         self.interface.set_pump(True)
         rospy.sleep(0.10)
 
-        # Smooth descent to touch top face of cube
-        self.interface.set_pose(x, y, z_touch, delay=0.45)
+        # Single smooth descent straight down to the cube surface
+        self.interface.set_pose(x, y, z_touch, delay=0.8)
 
         # Vacuum dwell time for reliable suction seal
         rospy.sleep(0.40)
 
-        # Vertical lift of cube
-        self.interface.set_pose(x, y, z_lift, delay=0.55)
+        # Single smooth vertical lift
+        self.interface.set_pose(x, y, z_lift, delay=0.8)
         print("Cube lifted successfully")
         rospy.loginfo(f">> [GRASP] Cube ID {target_id} lifted successfully to height z={z_lift}")
 
@@ -623,7 +685,7 @@ class ArmAction:
         2. If out of reach: rotate, rescan after rotation for exact coordinates.
         3. Vacuum grasp with dwell time and vertical lift.
         '''
-        cube_list = self.cam.detector(timeout=3.0)
+        cube_list = self.cam.detector(num_samples=6, timeout=3.0, conf_threshold=0.04)
         rospy.loginfo(f">> [GRASP1] Layer 2 Cake detection: {cube_list}")
 
         if len(cube_list) == 0:
@@ -631,75 +693,72 @@ class ArmAction:
             self.grasp_status_pub.publish(String("1"))
             return 0
 
-        cube_list.sort(key=lambda item: (abs(item[1][0] - 320) + (250 - item[1][1]) * 1.2))
-        target_cube = cube_list[0]
+        # Prefer an actual cake: this routine is the cake-first rule's only
+        # chance, and a ground cube can easily be in the same frame.
+        cake_visible = any(match_logic.is_cake(cube[0]) for cube in cube_list)
+        target_cube = match_logic.select_grasp_candidate(
+            cube_list, preferred_id=CAKE_ID if cake_visible else None, y_ref=250.0)
         target_id = target_cube[0]
         initial_target_id = target_id
         u = target_cube[1][0]
         v = target_cube[1][1]
+        if not match_logic.is_cake(target_id):
+            rospy.logwarn(
+                f">> [GRASP1] No cake class in view; best candidate is id "
+                f"{target_id}. Rule-critical: verify CAKE_SORTING_STATION "
+                f"({CAKE_SORTING_STATION}) and the cake detector class.")
 
-        x, y, z_surface, src = self.target_from_pixel(u, v, self.x_kb1, self.y_kb1, 57.0, 35.0, 100.0)
-        z_hover, z_touch, z_lift = self.contact_heights(z_surface)
+        # Geometry for Layer 2 Cake: sits on Layer 1 (top at -50 mm).
+        # Cake top surface is at z_touch ~ 40.0 mm (firm suction contact with 20 cm tier)
+        z_center = 0.0
+        z_touch = 40.0
+        z_safe = 75.0    # Clears any Layer 1 front-row obstacles safely!
+        z_lift = 85.0    # Vertical separation lift (+45 mm off pedestal, theta2=9.5 deg)
+        z_retract = 120.0
+        x_retract = 270.0
 
-        in_reach_x = (120.0 <= x <= 320.0)
-        in_reach_y = (-190.0 <= y <= 190.0)
-        ik_touch = self.is_in_arm_limit(x, y, z_touch)
-        ik_lift = self.is_in_arm_limit(x, y, z_lift)
-        can_reach_direct = in_reach_x and in_reach_y
-        if src != "3d":
-            # The analytical IK model is conservative at very low z; trust
-            # the measured 3D point when we have one.
-            can_reach_direct = can_reach_direct and ik_touch and ik_lift
+        # Dedicated approximation for Cake on Tier 2 (thefile2.txt +3cm forward):
+        cake_xy = match_logic.pixel_to_cake_xy(self.cam.transform3d, u, v, cup_offset_x=30.0)
+        if cake_xy is None:
+            rospy.logerr(">> [GRASP1] Degenerate cake approximation.")
+            self.grasp_status_pub.publish(String("1"))
+            return 0
+        x, y = cake_xy
 
-        rospy.loginfo(f">> [GRASP1] Target ID {target_id}: u={u}, v={v} -> x={x:.1f}, y={y:.1f}, z_surface={z_surface:.1f} ({src}) | reach_direct={can_reach_direct}")
+        # CRITICAL: For Cake positioned behind front-row obstacles,
+        # base motion is strictly inhibited to avoid colliding with front-row cubes.
+        # The manipulator reaches over the obstacle row from the stationary position.
+        in_reach = True
+        dist_to_cake = math.hypot(x, y)
+        rospy.loginfo(f">> [GRASP1] Target ID {target_id}: u={u:.0f}, v={v:.0f} -> x={x:.1f}, y={y:.1f}, dist={dist_to_cake:.1f} | obstacle-guard in_reach=True")
 
-        if can_reach_direct:
-            rospy.loginfo(f">> [GRASP1] Cake already in reach! Base NOT moving, grasping immediately.")
-        else:
-            rospy.loginfo(f">> [GRASP1] Cake out of direct reach. Adjusting base...")
-            delta_u = u - 320.0
-            if abs(delta_u) > 25.0:
-                angle_rad = -delta_u * 0.0019
-                rospy.loginfo(f">> [VISUAL-SERVO] Rotating base towards cake: {math.degrees(angle_rad):.1f} deg (u={u})...")
-                self.turn_base(angle_rad)
-
-            if x > 295.0:
-                drive_m = min(0.06, (x - 245.0) / 1000.0)
-                rospy.loginfo(f">> [VISUAL-SERVO] Cake far (x={x:.1f} mm). Driving forward {drive_m*100:.1f} cm...")
-                self.drive_base(drive_m)
-            elif x < 165.0:
-                rospy.loginfo(f">> [VISUAL-SERVO] Cake close (x={x:.1f} mm). Backing up 4 cm...")
-                self.drive_base(-0.04)
-
-            rospy.sleep(0.20)
-            rescan_list = self.cam.detector(timeout=3.0)
-            if rescan_list:
-                same_class = [it for it in rescan_list if it[0] == initial_target_id]
-                pool = same_class if same_class else rescan_list
-                pool.sort(key=lambda item: (abs(item[1][0] - 320) + (250 - item[1][1]) * 1.2))
-                target_cube = pool[0]
-                target_id = target_cube[0]
-                u = target_cube[1][0]
-                v = target_cube[1][1]
-                x, y, z_surface, src = self.target_from_pixel(u, v, self.x_kb1, self.y_kb1, 57.0, 35.0, 100.0)
-                z_hover, z_touch, z_lift = self.contact_heights(z_surface)
-                rospy.loginfo(f">> [GRASP1] Exact target of cake after rotation: u={u}, v={v} -> x={x:.1f}, y={y:.1f}, z_surface={z_surface:.1f} ({src})")
-
-        x = max(120.0, min(320.0, x))
+        # Safe reach limits expanded specifically for Cake up to 350.0 mm
+        x = max(120.0, min(350.0, x))
         y = max(-190.0, min(190.0, y))
         rospy.loginfo(f">> [GRASP1] Executing grasp for Cake ID {target_id}: x={x:.1f}, y={y:.1f}, z_touch={z_touch:.1f}, z_lift={z_lift:.1f}")
 
         self.interface.set_status(True)
-        rospy.sleep(0.15)
-        self.interface.set_pose(x, y, z_hover, delay=0.35)
+        rospy.sleep(0.20)
+
+        # Move above cake at safe height (z_safe=75 mm clears any ground cube in front)
+        self.interface.set_pose(130.0, 0.0, z_safe, delay=0.5)
+        self.interface.set_pose(x, y, z_safe, delay=0.9)
+
+        # Activate vacuum suction before descent so it draws immediately upon contact
         self.interface.set_pump(True)
-        rospy.sleep(0.10)
-        self.interface.set_pose(x, y, z_touch, delay=0.45)
-        rospy.sleep(0.40)
+        rospy.sleep(0.30)
+        self.interface.set_pose(x, y, z_touch, delay=0.9)
+        rospy.sleep(0.60)
 
         print("Layer 2 Cake lifted successfully")
-        self.interface.set_pose(x, y, z_lift, delay=0.55)
-        rospy.loginfo(f">> [GRASP1] Layer 2 Cake ID {target_id} lifted successfully to height z={z_lift}")
+        # Stage 1: Vertical separation off pedestal
+        self.interface.set_pose(x, y, z_lift, delay=0.8)
+        rospy.sleep(0.50)
+        # Stage 2: Pull cake inward to secure position and reduce torque
+        self.interface.set_pose(x_retract, y, z_retract, delay=0.8)
+        rospy.sleep(0.50)
+
+        rospy.loginfo(f">> [GRASP1] Layer 2 Cake ID {target_id} lifted and secured successfully to height z={z_retract}")
 
         self.grasp_status_pub.publish(String("0"))
         return target_id
@@ -733,16 +792,26 @@ class ArmAction:
         self.grasp_status_pub.publish(String("0"))
         return True
 
+    def _tower_xy(self, x_kb, y_kb, fallback=(235.0, 0.0)):
+        '''
+        (x, y) of the cube already standing in the drop zone, used to align the
+        stacking tower.  Falls back to the calibrated default point when the
+        camera sees nothing (SI-12: never index an empty detection list).
+        '''
+        cube = match_logic.select_grasp_candidate(self.cam.detector(timeout=3.0))
+        if cube is None:
+            rospy.logwarn(">> [DROP] No cube visible in the zone; "
+                          "stacking on the default point.")
+            return fallback
+        u, v = cube[1][0], cube[1][1]
+        # row (v) drives arm x, column (u) drives arm y - see arm_ik.py.
+        return match_logic.pixel_to_arm(v, u, x_kb, y_kb)
+
     def drop1(self, check=False):
         '''
         Place block, layer 2 height
         '''
-        cube_list = self.cam.detector(timeout=3.0)
-        if cube_list:
-            x = self.x_kb[0] * cube_list[0][1][1] + self.x_kb[1]
-            y = self.y_kb[0] * cube_list[0][1][0] + self.y_kb[1]
-        else:
-            x, y = 235, 0
+        x, y = self._tower_xy(self.x_kb, self.y_kb)
         z = 60
 
         # Position arm above placed cube
@@ -763,12 +832,7 @@ class ArmAction:
         '''
         Place block, layer 3 height
         '''
-        cube_list = self.cam.detector(timeout=3.0)
-        if cube_list:
-            x = self.x_kb1[0] * cube_list[0][1][1] + self.x_kb1[1]
-            y = self.y_kb1[0] * cube_list[0][1][0] + self.y_kb1[1]
-        else:
-            x, y = 235, 0
+        x, y = self._tower_xy(self.x_kb1, self.y_kb1)
         z = 160
 
         self.interface.set_pose(x, y, z, delay=0.40)
@@ -806,6 +870,136 @@ class ArmAction:
 
     def arm_grasp_laser(self, block=False):
         self.interface.set_pose(160, 0, 20, delay=0.35 if block else 0.20)
+
+    #: Pose used by the active calibration check: 270 mm in front, level,
+    #: 80 mm above the top of a floor cube, so a cube standing anywhere in the
+    #: workspace cannot be hit while the arm travels there.  Kept inside the
+    #: z range covered by the fit (>= -60 mm) so the check is not extrapolated.
+    CALIB_CHECK_POSE = (270.0, 0.0, 30.0)
+
+    def measure_pad(self, pose=None):
+        '''
+        Move to ``pose`` and return the median orange-pad pixel, or None.
+
+        A partially occluded pad still produces a centroid, just a biased one,
+        so only full-size blobs count and a few frames are medianed instead of
+        trusting the first reading.
+        '''
+        pose = self.CALIB_CHECK_POSE if pose is None else pose
+        try:
+            from cv_bridge import CvBridge
+            from pad_detect import grab, pad_pixel
+        except Exception as exc:
+            rospy.logerr(">> [CALIB] cannot load the pad detector: %s" % exc)
+            return None
+
+        bridge = CvBridge()
+        # NOTE: no M17 here.  Re-attaching the motors before every move made
+        # the uArm miss steps (~15 mm low), which looked exactly like a moved
+        # camera.  ArmAction.__init__ attaches them once; leave them attached.
+        self.interface.set_pose(float(pose[0]), float(pose[1]), float(pose[2]),
+                                delay=1.4)
+        rospy.sleep(0.3)
+        picks = []
+        for _ in range(5):
+            try:
+                found = pad_pixel(grab(bridge))
+            except Exception:
+                found = None
+            if found and found[2] >= PAD_MIN_AREA:
+                picks.append((found[0], found[1]))
+            if len(picks) >= 3:
+                break
+            rospy.sleep(0.1)
+        if not picks:
+            return None
+        return (float(np.median([pick[0] for pick in picks])),
+                float(np.median([pick[1] for pick in picks])))
+
+    def verify_calibration(self, pose=None, tol_px=6.0):
+        '''
+        Check that the camera and the arm still agree with the calibration.
+
+        Moves to a known pose, finds the pad and compares the measured pixel
+        with the pixel recorded during calibration (metadata sidecar).  That
+        reference is a real measurement, not a model prediction, so the check
+        is not confused by the ~2-3 px residual of the fit itself; a camera
+        that was moved shows up as a large jump.
+
+        The uArm steppers occasionally miss steps on one fast move, which
+        lands the pad ~15 mm low, so a failed measurement is retried once.  A
+        camera that really moved fails both attempts.
+
+        @return: (ok, detail).  A pad that is not visible returns ok=True with
+                 an explanatory detail: a lighting problem must not block the
+                 match, it only means the check could not run.
+        '''
+        pose = self.CALIB_CHECK_POSE if pose is None else pose
+        if self.cam is None:
+            return True, "no camera, check skipped"
+
+        best = None
+        for attempt in (1, 2):
+            uv = self.measure_pad(pose)
+            if uv is None:
+                if attempt == 1:
+                    rospy.logwarn(">> [CALIB] pad not visible at the check "
+                                  "pose, retrying once")
+                    self.arm_home(block=True)
+                    rospy.sleep(1.2)
+                    continue
+                return True, ("pose=(%.0f, %.0f, %.0f), but the pad is not "
+                              "visible/full-size - check skipped" % pose)
+            error, detail = self._pad_error(pose, uv)
+            if error is None:
+                return True, detail
+            if best is None or error < best[0]:
+                best = (error, detail)
+            if error <= tol_px:
+                break
+            if attempt == 1:
+                rospy.logwarn(">> [CALIB] pad check %.1f px off, retrying once"
+                              % error)
+                self.arm_home(block=True)
+                rospy.sleep(1.2)
+        return (best[0] <= tol_px), best[1]
+
+    def _pad_error(self, pose, uv):
+        '''Pixel distance between ``uv`` and the calibration reference.'''
+        detail = "pose=(%.0f, %.0f, %.0f), pad at (%.1f, %.1f)" % (
+            pose[0], pose[1], pose[2], uv[0], uv[1])
+        reference = self._calibration_reference(pose)
+        if reference is not None:
+            error = math.hypot(uv[0] - reference[0], uv[1] - reference[1])
+            detail += ", calibration frame (%.1f, %.1f)" % reference
+            source = "pad moved"
+        else:
+            error = pad_projection_error(self.cam.transform3d, pose, uv)
+            if error is None:
+                return None, detail + " - no metadata and pose not projectable"
+            source = "projection differs"
+        detail += ": %s by %.1f px" % (source, error)
+        return error, detail
+
+    def _calibration_reference(self, pose):
+        '''Pad pixel recorded by calib3d.py for ``pose``, if it matches.'''
+        meta = getattr(self.cam, "calib_meta", None)
+        if not meta:
+            return None
+        stored = meta.get("file_md5")
+        current = getattr(self.cam, "calib_md5", None)
+        if stored and current and stored != current:
+            rospy.logwarn(">> [CALIB] metadata belongs to a different matrix "
+                          "(stale sidecar); ignoring the stored check frame")
+            return None
+        check = meta.get("check") or {}
+        saved_pose = check.get("pose")
+        uv = check.get("uv")
+        if not saved_pose or not uv or len(saved_pose) != 3 or len(uv) != 2:
+            return None
+        if max(abs(float(a) - float(b)) for a, b in zip(saved_pose, pose)) > 1.0:
+            return None
+        return (float(uv[0]), float(uv[1]))
 
 class RobotMoveAction:
     def __init__(self):
@@ -938,370 +1132,421 @@ class RobotMoveAction:
 
 class AutoAction:
     def __init__(self):
-        # # 初始化节点
-        # if init_node:
         rospy.init_node('spark_auto_match_node', anonymous=True)
 
         print("========ready to task===== ")
 
-        # 实例化Cam
-        try: self.cam = CamAction()
-        except Exception as e:  print("except cam:",e)
-        print("========实例化Cam===== ")
-        # 实例化Arm
-        try: self.arm = ArmAction()
-        except Exception as e:  print("except arm:",e)
-        print("========实例化Arm===== ")
-        # 实例化Robot
-        try: self.robot = RobotMoveAction()
-        except Exception as e:  print("except robot:",e)
-        print("========实例化Robot===== ")
-        
-        # Item ID mapping (Rule-compliant normalization)
-        self.BANANA_ID = 4      # banana (4 or banana_site 40)
-        self.TEDDY_ID  = 1      # teddy bear (1 or bear_site 10)
-        self.CLOCK_ID  = 3      # clock (3 or clock_site 30)
-        self.CAKE_ID   = 2      # cake/wine (2 or wine_site 20)
-        self.CUP_ID    = 2      # alias for backwards compatibility
+        # Build the three subsystems one by one and record failures instead of
+        # swallowing them: a half-built node used to crash later with a bare
+        # AttributeError, which is impossible to diagnose on the field.
+        self.cam = None
+        self.arm = None
+        self.robot = None
+        self.init_errors = []
+
+        try:
+            self.cam = CamAction()
+            print("========实例化Cam===== ")
+        except Exception as e:
+            self.init_errors.append(f"camera: {e}")
+            rospy.logerr(f">> [INIT] CamAction failed: {e}")
+
+        try:
+            if self.cam is None:
+                raise RuntimeError("camera subsystem unavailable")
+            self.arm = ArmAction(cam=self.cam)
+            print("========实例化Arm===== ")
+        except Exception as e:
+            self.init_errors.append(f"arm: {e}")
+            rospy.logerr(f">> [INIT] ArmAction failed: {e}")
+
+        try:
+            self.robot = RobotMoveAction()
+            print("========实例化Robot===== ")
+        except Exception as e:
+            self.init_errors.append(f"robot: {e}")
+            rospy.logerr(f">> [INIT] RobotMoveAction failed: {e}")
+
+        # A matrix that cannot even be read/parsed is a hard stop: every grasp
+        # would miss by tens of millimetres with no error anywhere.
+        if self.cam is not None and not getattr(self.cam, "calib_ok", True):
+            self.init_errors.append("calibration: camera->arm matrix failed "
+                                    "the sanity check (run calib3d.py)")
+
+        # Active check: runs ONLY ONCE after the arm driver starts.
+        # Once verified, /tmp/arm_calib_done persists so subsequent launches
+        # do not move the manipulator unnecessarily before every run.
+        calib_flag = "/tmp/arm_calib_done"
+        if (self.arm is not None and not self.init_errors
+                and os.environ.get("SPARK_CALIB_CHECK", "1") != "0"
+                and not os.path.exists(calib_flag)):
+            try:
+                calib_ok, calib_detail = self.arm.verify_calibration()
+            except Exception as e:
+                calib_ok, calib_detail = True, "check crashed: %s" % e
+            if calib_ok:
+                rospy.loginfo(f">> [CALIB] active pad check: {calib_detail}")
+                try:
+                    with open(calib_flag, "w") as f:
+                        f.write(time.strftime("%Y-%m-%dT%H:%M:%S\n"))
+                except Exception:
+                    pass
+            else:
+                rospy.logerr(f">> [CALIB] active pad check FAILED: {calib_detail}")
+                self.init_errors.append(
+                    f"calibration: pad check failed ({calib_detail})")
+            try:
+                self.arm.arm_home(block=True)
+            except Exception as e:
+                rospy.logwarn(f">> [CALIB] could not home the arm: {e}")
+        elif os.path.exists(calib_flag):
+            rospy.loginfo(">> [CALIB] Manipulator already calibrated once after driver startup, skipping pad check.")
+        elif self.arm is not None and not self.init_errors:
+            rospy.logwarn(">> [CALIB] active pad check disabled by "
+                          "SPARK_CALIB_CHECK=0: a moved camera will not be "
+                          "detected at startup")
+
+        #: True only when the whole chain is up; the FSM refuses to start otherwise.
+        self.ready = not self.init_errors
+
+        # Item ID mapping (rule-compliant normalization lives in match_logic).
+        self.BANANA_ID = match_logic.BANANA_ID
+        self.TEDDY_ID = match_logic.TEDDY_ID
+        self.CLOCK_ID = match_logic.CLOCK_ID
+        self.CAKE_ID = CAKE_ID
+        self.CUP_ID = match_logic.CAKE_ID  # alias for backwards compatibility
+
+        # Zone mapping; always defined so no code path can hit AttributeError.
+        self.mapping = expand_aliases(dict(DEFAULT_MAPPING))
 
         # 订阅任务控制指令的话题
-        self.task_cmd_sub = rospy.Subscriber("/task_start_flag", String, self.task_cmd_cb) # 订阅任务开始与否信号
-        self.task_run_th = threading.Thread(target=lambda: "pass") # 创建线程对象
+        self.task_cmd_sub = rospy.Subscriber("/task_start_flag", String, self.task_cmd_cb)
+        self.task_run_th = threading.Thread(target=lambda: "pass")
         self.stop_flag = False  # 任务的启停标志
 
         # Subscribe to manual arm control (/grasp)
         self.grasp_sub = rospy.Subscriber("/grasp", String, self.grasp_cb)
 
         rospy.loginfo("==============================================")
-        rospy.loginfo("  spark_auto_match_node is ready!             ")
-        rospy.loginfo("  Ready to accept /grasp 1 and /task_start_flag ")
+        if self.ready:
+            rospy.loginfo("  spark_auto_match_node is ready!             ")
+            rospy.loginfo("  /task_start_flag start|stop   /grasp 1|0     ")
+        else:
+            rospy.logerr("  spark_auto_match_node is NOT ready:          ")
+            for problem in self.init_errors:
+                rospy.logerr(f"    - {problem}")
+            rospy.logerr("  Fix the subsystems above; the match will not start.")
         rospy.loginfo("==============================================")
+
+    # ------------------------------------------------------------------
+    # Mission helpers
+    # ------------------------------------------------------------------
+    def _abort_requested(self, clock=None):
+        """True when the operator stopped the run or the match budget is gone."""
+        if self.stop_flag:
+            rospy.logwarn(">> [TASK] stop requested by the operator")
+            return True
+        if clock is not None:
+            if clock.warn():
+                rospy.logwarn(f">> [TASK] only {clock.remaining():.0f} s of the "
+                              f"time budget left")
+            if clock.expired():
+                rospy.logerr(f">> [TASK] time budget exhausted after "
+                             f"{clock.elapsed():.0f} s; stopping before overtime")
+                return True
+        return False
+
+    def _navigate(self, name):
+        """goto_local with one retry and a diagnostic hint when nav is absent."""
+        if self.robot.goto_local(name):
+            return True
+        rospy.logwarn(f">> [TASK] navigation to {name} failed, retrying once")
+        if self.robot.goto_local(name):
+            return True
+        rospy.logerr(f">> [TASK] navigation to {name} failed twice. Is the "
+                     f"navigation stack running? start_system.sh only launches "
+                     f"the drivers; /move_base and mark_nav must come from the "
+                     f"arena navigation launch file (Phase 2).")
+        return False
+
+    def _execute_exit_maneuver(self, station, drop_zone):
+        """Leave the station without dragging the cube through the centre board."""
+        maneuver = match_logic.exit_maneuver(station, drop_zone)
+        if not maneuver:
+            return
+        kind, value = maneuver
+        if kind == "back":
+            self.robot.step_back(value)
+            rospy.sleep(0.6)
+        elif kind == "arrive":
+            self.robot.arriveto_local(value)
+            rospy.sleep(0.6)
+
+    def _deliver(self, item_id, station, drop_times, force_zone=None):
+        """Drive to the mapped zone and stack the held cube; returns the zone."""
+        zone = force_zone
+        if zone is None or drop_times.get(zone, 0) >= MAX_TIER:
+            zone = match_logic.choose_drop_zone(item_id, self.mapping, drop_times)
+        if zone is None:
+            rospy.logerr(">> [DROP] every zone already holds a 3-cube tower; "
+                         "releasing the cube here so the arm is free")
+            self.arm.drop()
+            return None
+
+        self._execute_exit_maneuver(station, zone)
+        self.arm.arm_grasp_ready()
+
+        if not self._navigate(zone):
+            rospy.logerr(f">> [DROP] releasing the cube at the current position "
+                         f"instead of {zone}")
+            self.arm.drop()
+            return None
+
+        rospy.sleep(SETTLE_S)
+        routine = match_logic.plan_drop(drop_times.get(zone, 0)) or "drop"
+        getattr(self.arm, routine)()
+        drop_times[zone] = drop_times.get(zone, 0) + 1
+        rospy.loginfo(f">> [DROP] item {item_id} -> {zone}, "
+                      f"tier {drop_times[zone]} via {routine}()")
+        return zone
+
+    def _finish(self, clock, drop_times, total_drop_times, cake_delivered):
+        """Park the arm and print a match summary that can be scored by hand."""
+        self.arm.arm_home()
+        estimate = match_logic.estimate_score(
+            drop_times, red_zones=match_logic.RED_ZONES, started_from_base=True)
+        rospy.logwarn("***** task finished *****")
+        rospy.logwarn(f"  cubes delivered: {total_drop_times} / {TOTAL_CUBES}")
+        rospy.logwarn(f"  tiers per zone:  {drop_times}")
+        rospy.logwarn(f"  estimated score: {estimate}")
+        if not cake_delivered:
+            rospy.logwarn("  NOTE: the cake-first rule was not satisfied, so the "
+                          "real score is lower than this estimate.")
+        rospy.logwarn(f"  elapsed: {clock.elapsed():.0f} s of a "
+                      f"{clock.limit_s:.0f} s budget")
+        rospy.logwarn("Re-send 'start' on /task_start_flag to run again, or Ctrl+C.")
 
     # 接收到启动自动赛信号，开始执行任务
     def run_task(self):
-        ret = False # 是否导航成功标志
-        item_type = 0 
-        # self.arm.arm_home()  # 移动机械臂到其他地方
+        """Full 10-cube mission: cake first, then board-driven sorting."""
+        if not self.ready:
+            rospy.logerr(">> [TASK] refusing to start: " + "; ".join(self.init_errors))
+            return
 
-        # ===== 现在开始执行任务 =====
+        clock = MatchClock(limit_s=TASK_TIME_BUDGET_S,
+                           warn_s=match_logic.TIME_WARN_S).start()
+        self.stop_flag = False
+        self.mapping = expand_aliases(dict(DEFAULT_MAPPING))
+
+        stations = {name: STATION_PICKS for name in match_logic.STATION_ORDER}
+        drop_times = {zone: 0 for zone in ("Collection_A",) + ZONES_BCD}
+        empty_attempts = {name: 0 for name in match_logic.STATION_ORDER}
+        total_drop_times = 0
+        cake_delivered = False
+        last_zone = "Collection_A"
+
         rospy.loginfo("start task now.")
-        self.arm.arm_grasp_ready()  # 移动机械臂到其他地方
+        self.arm.arm_grasp_ready()
         # ==== 离开起始区,避免在膨胀区域中，导致导航失败 =====
         self.robot.step_go(0.4)
+        if self._abort_requested():
+            return
+        # Motors stay continuously attached from driver bringup (M17); avoid motor reset slip
 
-        if self.stop_flag: return
-
-        # ==== 移动机械臂 =====
-        self.arm.arm_position_reset()  # 重置机械臂坐标系
-
-        # robot_thread = threading.Thread(target=lambda: self.robot.step_go(0.4))
-        # robot_thread.start()
-
-        # arm_thread = threading.Thread(target=lambda: [self.arm.arm_position_reset(), self.arm.arm_grasp_ready()])
-        # arm_thread.start()
-
-        # robot_thread.join()
-        # arm_thread.join()
-
-        # ===== 导航到分类区 =====
-        if self.robot.goto_local("Classification_area"):
+        # ===== classification board (SI-14: fall back instead of aborting) =====
+        if self._navigate("Classification_area"):
             rospy.sleep(0.2)
-            # 新增：解析分类板
             self.mapping = self.detect_classification_board()
         else:
-            rospy.logerr("Navigation to Classification_area failed,please run task again ")
-            self.stop_flag = True
-        
-        # 创建任务安排字典，设定前往的抓取地点与次数
-        sorting_status_times = {
-            "Sorting_W":2,
-            "Sorting_S":2,
-            "Sorting_E":2,
-            "Sorting_N":2,
-            "Sorting_M":2,
-        }
+            rospy.logerr(">> [TASK] board area unreachable: running with the "
+                         "DEFAULT mapping (cake->A, bear->B, clock->C, banana->D)")
 
-        drop_times = {
-            "Collection_B":0,
-            "Collection_C":0,
-            "Collection_D":0,
-            "Collection_A":0,
-        }
-
-        sorting_name = "Sorting_W"
-        # pre_sorting = "Sorting_W"
-        at_sorting = False
-        drop_zone = 'Collection_A'
-        total_drop_times = 0
-        # =======开始循环运行前往中心区域抓取与放置任务======
-        while True:
-            # 根据任务安排逐步执行
-            print("readying to sort_areas")
-
-            if total_drop_times == 10:
-                break
-            else:
-                sorting_name = list(sorting_status_times.keys())[0]
-
-            # =====导航到目标地点====
-            if(at_sorting == False):
-                if(drop_zone == "Collection_B"):
-                    if "Sorting_E" in sorting_status_times:
-                        if(sorting_status_times["Sorting_E"] > 0):
-                            sorting_name = "Sorting_E"
-                    elif "Sorting_N" in sorting_status_times:
-                        if(sorting_status_times["Sorting_N"] > 0):
-                            sorting_name = "Sorting_N"
-                if(drop_zone == "Collection_C"):
-                    if "Sorting_S" in sorting_status_times:
-                        if(sorting_status_times["Sorting_S"] > 0):
-                            sorting_name = "Sorting_S"
-                    elif "Sorting_E" in sorting_status_times:
-                        if(sorting_status_times["Sorting_E"] > 0):
-                            sorting_name = "Sorting_E"
-                if(drop_zone == "Collection_D"):
-                    if "Sorting_W" in sorting_status_times:
-                        if(sorting_status_times["Sorting_W"] > 0):
-                            sorting_name = "Sorting_W"
-                    elif "Sorting_S" in sorting_status_times:
-                        if(sorting_status_times["Sorting_S"] > 0):
-                            sorting_name = "Sorting_S"
-
-
-            if(at_sorting == False):
-                if(drop_zone == "Collection_B"):
-                    if(sorting_name == 'Sorting_W'):
-                        ret = self.robot.arriveto_local("Step_NW")
-                    if(sorting_name == 'Sorting_S'):
-                        ret = self.robot.arriveto_local('Step_SE')
-                if(drop_zone == "Collection_C"):
-                    if(sorting_name == 'Sorting_W'):
-                        ret = self.robot.arriveto_local("Step_SW")
-                    if(sorting_name == 'Sorting_N' or sorting_name == 'Sorting_M'):
-                        ret = self.robot.arriveto_local('Step_NE')
-                if(drop_zone == "Collection_D"):
-                    if(sorting_name == 'Sorting_N' or sorting_name == 'Sorting_M'):
-                        ret = self.robot.arriveto_local("Step_NW")
-                    if(sorting_name == 'Sorting_E'):
-                        ret = self.robot.arriveto_local('Step_SE')
-
-                        
-            ret = self.robot.goto_local(sorting_name) # 导航到目标点
-            at_sorting =True
-            rospy.sleep(1) # 停稳
-
-            if self.stop_flag: return
-
-            # =====识别并抓取物体====
-            item_type = 0
-            if ret: # 判断是否成功到达目标点
-                print("========扫描中，准备抓取===== ")
-                # REGULATION RULE: FIRST item (total_drop_times == 0) MUST be Cake on tier 2!
-                if total_drop_times == 0:
-                    rospy.loginfo(">> [RULES] Grasping 1st item: Tier 2 Cake (grasp1)")
-                    item_type = self.arm.grasp1()
+        # ===== cake rush: the first cube of the match MUST be the cake =====
+        if not self._abort_requested(clock):
+            rospy.loginfo(f">> [RULES] first delivery from {CAKE_SORTING_STATION} "
+                          f"goes to Collection_A")
+            if self._navigate(CAKE_SORTING_STATION):
+                rospy.sleep(SETTLE_S)
+                first_id = self.arm.grasp1()
+                if first_id == 0:
+                    rospy.logerr(">> [RULES] no cube seen at the cake station: "
+                                 "the cake-first rule cannot be guaranteed")
                 else:
-                    item_type = self.arm.grasp()  # 抓取物品并返回抓取物品的类型
+                    cake_delivered = match_logic.is_cake(first_id)
+                    if not cake_delivered:
+                        rospy.logerr(f">> [RULES] first grasp was item {first_id}, "
+                                     f"not the cake: cake points are forfeited")
+                    if self._deliver(first_id, CAKE_SORTING_STATION, drop_times,
+                                     force_zone="Collection_A"):
+                        total_drop_times += 1
+                        last_zone = "Collection_A"
+                        stations[CAKE_SORTING_STATION] = max(
+                            0, stations.get(CAKE_SORTING_STATION, 1) - 1)
+                        if stations.get(CAKE_SORTING_STATION, 0) <= 0:
+                            match_logic.retire_station(stations,
+                                                       CAKE_SORTING_STATION)
+            else:
+                rospy.logerr(f">> [RULES] cake station {CAKE_SORTING_STATION} "
+                             f"unreachable; continuing with the sorting loop")
 
-                if self.stop_flag: return
+        # ===== sorting loop =====
+        while not self._abort_requested(clock):
+            if total_drop_times >= TOTAL_CUBES:
+                break
+            if not stations:
+                rospy.logwarn(">> [TASK] every station is retired; finishing early")
+                break
 
-            if item_type == 0: # 如果没有识别到物体，将该地点的抓取次数归0
-                sorting_status_times[sorting_name] = 0
+            station = match_logic.choose_station(last_zone, stations)
+            if station is None:
+                break
+            rospy.loginfo(f">> [TASK] cycle {total_drop_times + 1}/{TOTAL_CUBES}: "
+                          f"station {station} "
+                          f"({stations.get(station, 0)} pick(s) left)")
+
+            waypoint = match_logic.approach_waypoint(station, last_zone)
+            if waypoint:
+                self.robot.arriveto_local(waypoint)
+
+            if not self._navigate(station):
+                match_logic.retire_station(stations, station)
+                rospy.logerr(f">> [TASK] {station} unreachable; retired")
                 continue
 
-            
-            # ====放置物品====
-            self.arm.arm_grasp_ready()
-            print("========前往放置区===== ")
+            rospy.sleep(SETTLE_S)
+            # Floor routine everywhere in the loop: the tier-2 cake is handled
+            # once, up front, by the cake rush.
+            item_id = self.arm.grasp()
+            if item_id == 0:
+                empty_attempts[station] = empty_attempts.get(station, 0) + 1
+                rospy.logwarn(f">> [TASK] nothing grasped at {station} "
+                              f"({empty_attempts[station]}/{MAX_EMPTY_ATTEMPTS})")
+                if empty_attempts[station] >= MAX_EMPTY_ATTEMPTS:
+                    match_logic.retire_station(stations, station)
+                    rospy.logerr(f">> [TASK] {station} retired after "
+                                 f"{MAX_EMPTY_ATTEMPTS} empty scans")
+                continue
 
-            # REGULATION RULE: Cake MUST be delivered to Collection_A first!
-            if total_drop_times == 0 or norm_id(item_type) == self.CAKE_ID:
-                drop_zone = "Collection_A"
-            else:
-                canonical = norm_id(item_type)
-                drop_zone = self.mapping.get(canonical, self.mapping.get(item_type, "Collection_B")) 
-            
-            
-
-            rospy.loginfo(f"本次物品ID: {item_type} → 放置区: {drop_zone}")
-
-            # === 用动态放置区导航 ===
-            if(drop_zone == 'Collection_B'):
-                if(sorting_name == 'Sorting_S'):
-                    ret = self.robot.step_back(0.4)
-                    rospy.sleep(0.6)
-                if(sorting_name == 'Sorting_W'):
-                    ret = self.robot.arriveto_local("Step_NW")
-            if(drop_zone == 'Collection_C'):
-                if(sorting_name == 'Sorting_N'):
-                    ret = self.robot.step_back(0.4)
-                    rospy.sleep(0.6)
-                if(sorting_name == 'Sorting_W'):
-                    ret = self.robot.arriveto_local("Step_SW")
-            if(drop_zone == 'Collection_D'):
-                if(sorting_name == 'Sorting_N'):
-                    ret = self.robot.step_back(0.4)
-                    rospy.sleep(0.6)
-                if(sorting_name == 'Sorting_E'):
-                    ret = self.robot.step_back(0.4)
-                    rospy.sleep(0.6)
-
-            ret = self.robot.goto_local(drop_zone)
-            rospy.sleep(1)  # 停稳
-            if self.stop_flag: return
-
-            if ret:
-                if drop_times[drop_zone] == 0:
-                    self.arm.drop()  # 放下物品
-                    drop_times[drop_zone] += 1
-
-                elif drop_times[drop_zone] == 1:
-                    self.arm.drop1()  # 放下物品
-                    drop_times[drop_zone] += 1
-
-                elif drop_times[drop_zone] == 2:
-                    self.arm.drop2()  # 放下物品
-                    
-                if self.stop_flag: return
-            else:
-                rospy.logerr("task error: navigation to the drop_place fails")
+            if self._abort_requested(clock):
+                rospy.logwarn(">> [TASK] abort while holding a cube: parking it here")
                 self.arm.drop()
-            if self.stop_flag: return
+                break
 
-            # 下一步
-            sorting_status_times[sorting_name] = sorting_status_times[sorting_name] - 1
-            if "Sorting_E" in sorting_status_times:
-                if(sorting_status_times["Sorting_E"] == 0):
-                    sorting_status_times.pop("Sorting_E")
-                    # if "Sorting_N" in sorting_status_times:
-                    #     sorting_status_times["Sorting_N"] -=1
-                    # if "Sorting_S" in sorting_status_times:
-                    #     sorting_status_times["Sorting_S"] -=1
-            if "Sorting_W" in sorting_status_times:
-                if(sorting_status_times["Sorting_W"] == 0):
-                    sorting_status_times.pop("Sorting_W")
-                    # if "Sorting_N" in sorting_status_times:
-                    #     sorting_status_times["Sorting_N"] -=1
-                    # if "Sorting_S" in sorting_status_times:
-                    #     sorting_status_times["Sorting_S"] -=1
-            if "Sorting_N" in sorting_status_times:
-                if(sorting_status_times["Sorting_N"] == 0):
-                    sorting_status_times.pop("Sorting_N")
-                    # if "Sorting_W" in sorting_status_times:
-                    #     sorting_status_times["Sorting_W"] -=1
-                    # if "Sorting_E" in sorting_status_times:
-                    #     sorting_status_times["Sorting_E"] -=1
-            if "Sorting_S" in sorting_status_times:
-                if(sorting_status_times["Sorting_S"] == 0):
-                    sorting_status_times.pop("Sorting_S")
-                    # if "Sorting_W" in sorting_status_times:
-                    #     sorting_status_times["Sorting_W"] -=1
-                    # if "Sorting_E" in sorting_status_times:
-                    #     sorting_status_times["Sorting_E"] -=1
-            at_sorting = False
+            delivered_zone = self._deliver(item_id, station, drop_times)
+            if delivered_zone:
+                last_zone = delivered_zone
             total_drop_times += 1
+            empty_attempts[station] = 0
+            stations[station] = max(0, stations.get(station, 1) - 1)
+            if stations.get(station, 0) <= 0:
+                match_logic.retire_station(stations, station)
 
+        self._finish(clock, drop_times, total_drop_times, cake_delivered)
 
-        self.arm.arm_home()
-        # act.goto_local("sp")
+    def detect_classification_board(self):
+        '''
+        Read the three-slot classification board and build the zone mapping.
 
-        rospy.logwarn("***** task finished *****")
-        rospy.logwarn("if you want to run task again. ")
-        rospy.logwarn("Re-send a message to hm_task_cmd topic. ")
-        rospy.logwarn("Or press Ctrl+C to exit the program")
-        
-    def detect_classification_board(self): 
-        rospy.loginfo("开始检测分类版图案 (Temporal Voting)...")
-
-        zones = ["Collection_B", "Collection_C", "Collection_D"]
-        mapping = {}
+        Slots are voted over up to BOARD_FRAMES frames (left to right in image
+        order).  The vote result goes through
+        match_logic.decode_classification_board(), which keeps the DEFAULT
+        mapping when the board was not read cleanly (SI-14: never leave the
+        mission without a mapping).
+        '''
+        rospy.loginfo(">> [BOARD] reading the classification board ...")
         slot_votes = {0: [], 1: [], 2: []}
-        start_time = rospy.Time.now()
         collected = 0
+        deadline = rospy.Time.now() + rospy.Duration(6.0)
+        slots = len(ZONES_BCD)
 
-        while not rospy.is_shutdown() and collected < 12 and (rospy.Time.now() - start_time).to_sec() < 6.0:
+        while (not rospy.is_shutdown() and collected < BOARD_FRAMES
+               and rospy.Time.now() < deadline):
             try:
-                obj_array = rospy.wait_for_message("/objects", Detection2DArray, timeout=0.5)
+                obj_array = rospy.wait_for_message(
+                    "/objects", Detection2DArray, timeout=0.5)
             except Exception:
-                rospy.logwarn("未检测到分类版物体，继续等待...")
+                rospy.logwarn_throttle(2.0, ">> [BOARD] no /objects message, waiting ...")
                 continue
 
             objs = []
             for obj in obj_array.detections:
-                raw_id = obj.results[0].id
-                item_id = norm_id(raw_id)
-                # Classification board contains only 3 items: bear (1), clock (3), banana (4). Cake (2) is not on board!
-                if item_id == 2 or item_id not in (1, 3, 4):
+                try:
+                    result = obj.results[0]
+                    item_id = norm_id(result.id)
+                    score = float(getattr(result, 'score', 1.0) or 0.0)
+                except Exception:
                     continue
-                score = obj.results[0].score if hasattr(obj.results[0], 'score') else 1.0
-                if score < 0.45:
+                # The board carries only the bear/clock/banana cards.
+                if item_id not in match_logic.BOARD_ITEMS or score < CONF_THRESHOLD:
                     continue
-                item_x = obj.bbox.center.x
-                objs.append((item_id, item_x))
+                objs.append((item_id, obj.bbox.center.x))
 
-            if len(objs) < 3:
+            if len(objs) < slots:
                 continue
 
-            # Sort left to right by X coordinate
-            objs.sort(key=lambda x: x[1])
-            slot_votes[0].append(objs[0][0])
-            slot_votes[1].append(objs[1][0])
-            slot_votes[2].append(objs[2][0])
+            objs.sort(key=lambda pair: pair[1])
+            for slot in range(slots):
+                slot_votes[slot].append(objs[slot][0])
             collected += 1
 
-        for slot in range(3):
-            if slot_votes[slot]:
-                winner = Counter(slot_votes[slot]).most_common(1)[0][0]
-            else:
-                default_order = [self.TEDDY_ID, self.CLOCK_ID, self.BANANA_ID]
-                winner = default_order[slot]
-            target_zone = zones[slot]
-            mapping[winner] = target_zone
-            # Map aliases to ensure reliable lookup matches
-            if winner == self.CLOCK_ID:
-                mapping[30] = target_zone
-                mapping[3] = target_zone
-            elif winner == self.BANANA_ID:
-                mapping[40] = target_zone
-                mapping[4] = target_zone
-            elif winner == self.TEDDY_ID:
-                mapping[1] = target_zone
+        winners = []
+        for slot in range(slots):
+            votes = slot_votes[slot]
+            winners.append(Counter(votes).most_common(1)[0][0] if votes else None)
 
-        # Cake/Wine (2 / 20) ALWAYS goes to Collection_A
-        mapping[self.CAKE_ID] = "Collection_A"
-        mapping[2] = "Collection_A"
-        mapping[20] = "Collection_A"
-
-        rospy.loginfo(f"Classification board detection (Final voted mapping): {mapping}")
+        mapping = decode_classification_board(winners)
+        if match_logic.board_is_confident(winners):
+            rospy.loginfo(f">> [BOARD] {collected} frame(s) voted; mapping = {mapping}")
+        else:
+            rospy.logerr(f">> [BOARD] board not read cleanly (winners={winners}, "
+                         f"{collected} frame(s)); using DEFAULT mapping {DEFAULT_MAPPING}")
         return mapping
 
-    def task_cmd_cb(self,flag):
-        if flag :
-            if not self.task_run_th.is_alive():
-                self.stop_flag = False
-                self.task_run_th = threading.Thread(target=self.run_task, args=())
-                self.task_run_th.start()
-                rospy.loginfo("start task!!!")
-            else:
-                rospy.logwarn("waiting for thread exit...")
+    def task_cmd_cb(self, msg):
+        '''Start/stop the mission from /task_start_flag, honouring the payload.'''
+        command = parse_task_command(getattr(msg, 'data', ''))
+        if command == "start":
+            if not self.ready:
+                rospy.logerr(">> [TASK] cannot start: " + "; ".join(self.init_errors))
+                return
+            if self.task_run_th.is_alive():
+                rospy.logwarn(">> [TASK] a mission is already running; send 'stop' first")
+                return
+            self.stop_flag = False
+            self.task_run_th = threading.Thread(
+                target=self.run_task, args=(), daemon=True)
+            self.task_run_th.start()
+            rospy.loginfo(">> [TASK] mission started by /task_start_flag")
+        elif command == "stop":
+            if self.task_run_th.is_alive():
                 self.stop_flag = True
-                self.task_run_th.join()
-                rospy.logwarn("thread exit success")
+                rospy.logwarn(">> [TASK] stop requested; the mission exits at its "
+                              "next checkpoint (the thread is not joined because it "
+                              "may be mid-motion)")
+            else:
+                rospy.loginfo(">> [TASK] nothing to stop")
+        else:
+            rospy.logwarn(f">> [TASK] ignoring unknown /task_start_flag payload "
+                          f"'{getattr(msg, 'data', '')}' (use 'start' or 'stop')")
 
     def grasp_cb(self, msg):
         rospy.loginfo(f">> [GRASP_CB] Received message on /grasp: '{msg.data}'")
-        if not self.task_run_th.is_alive():
-            if msg.data == "1":
-                rospy.loginfo(">> [GRASP_CB] Starting cube grasp (arm.grasp)...")
-                self.arm.grasp()
-            elif msg.data == "0":
-                rospy.loginfo(">> [GRASP_CB] Releasing cube (arm.drop)...")
-                self.arm.drop()
-                self.arm.arm_grasp_ready()
-            else:
-                rospy.logwarn(f"Unknown grasp command: '{msg.data}'")
-        else:
+        if not self.ready:
+            rospy.logerr(">> [GRASP_CB] manual grasp unavailable: "
+                         + "; ".join(self.init_errors))
+            return
+        if self.task_run_th.is_alive():
             rospy.logwarn("Match task thread already running; /grasp command ignored")
+            return
+        if msg.data == "1":
+            rospy.loginfo(">> [GRASP_CB] Starting cube grasp (arm.grasp)...")
+            self.arm.grasp()
+        elif msg.data == "0":
+            rospy.loginfo(">> [GRASP_CB] Releasing cube (arm.drop)...")
+            self.arm.drop()
+            self.arm.arm_grasp_ready()
+        else:
+            rospy.logwarn(f"Unknown grasp command: '{msg.data}'")
 
 
 if __name__ == '__main__':

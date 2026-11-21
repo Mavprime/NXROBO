@@ -1,0 +1,26 @@
+# Physical parameters used by the spatial simulation (Level 0B).
+#
+# Sources (production code in ../auto/codes/):
+#   - linear 0.18 m/s, angular 0.75 rad/s : runtask.py drive_base() / turn_base()
+#   - accel/decel limits                   : keypatched2v.py MAX_LIN_ACCEL etc.
+#   - pick/place durations                 : runtask.py grasp()/drop() delays
+#
+# These are the *production autonomous* values. Teleop FAST mode can do 0.45 m/s
+# (keypatched2v.py LIN_SPEED_FAST), but drive_base() is what the mission uses.
+
+chassis:
+  max_linear_mps: 0.18       # runtask.py:538
+  max_angular_rps: 0.75      # runtask.py:507
+  lin_accel_mps2: 3.0        # keypatched2v.py: MAX_LIN_ACCEL
+  lin_decel_mps2: 5.0        # keypatched2v.py: MAX_LIN_DECEL
+  ang_accel_rps2: 3.0        # keypatched2v.py: MAX_ANG_ACCEL
+  ang_decel_rps2: 8.0        # keypatched2v.py: MAX_ANG_DECEL
+  settle_s: 0.10             # runtask.py: post-move rospy.sleep(0.10)
+
+arm:
+  pick_s: 4.0                # grasp(): 0.9 + 0.1 + 0.8 + 0.4 + 0.8 (~3.2 s) + margin
+  place_s: 3.0               # drop(): 0.8 + 0.4 + 0.6 + 0.8 + 0.4 (~3.0 s)
+
+perception:
+  frame_period_s: 0.10       # 10 Hz detection window
+  scan_timeout_s: 3.0        # detector(num_samples=6, timeout=3.0)

@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
-# Остановка всех подсистем Spark
+# Stop all Spark subsystems, including the mission bag recorder.
 
-echo "Остановка всех процессов..."
+echo "Stopping all processes..."
 fuser -k 8080/tcp 2>/dev/null
+
+# Stop the recorder first so the bag file is closed cleanly.
+if pgrep -f "rosbag record" >/dev/null; then
+    pkill -INT -f "rosbag record" 2>/dev/null
+    sleep 2
+    pkill -f "rosbag record" 2>/dev/null
+    echo "  + mission bag recorder stopped (file closed)"
+fi
+
 pkill -f "runtask.py" 2>/dev/null
 pkill -f "detect_ros.py" 2>/dev/null
 pkill -f "camera_stream.py" 2>/dev/null
+pkill -f "nav_bringup.sh" 2>/dev/null
 pkill -f "pro_control_nomoveit" 2>/dev/null
 pkill -f "spark_bringup" 2>/dev/null
 pkill -f "spark_base_server" 2>/dev/null
 rosnode kill -a 2>/dev/null
-echo "Все процессы остановлены."
+echo "All processes stopped."

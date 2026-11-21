@@ -1,0 +1,45 @@
+# Demo mission: the direct chassis task.
+#
+#   start in A -> drive to the centre -> pick the cake -> deliver it to A -> verify.
+#
+# Named points available (make_arena.py -> scenario.json):
+#   Classification_area, Sorting_N/S/E/W,
+#   Collection_A..D, Collection_A..D_approach, A_start (start pose only)
+#
+# The robot starts in the A collection zone at (-1.275, +1.275) yaw -pi/2.
+# "Center" = the 3x3 brick cluster at (0,0), approached at Sorting_N.
+
+name: demo_pick_deliver
+description: >
+  Start in A, drive to the centre, pick the cake, deliver it to zone A, verify it.
+clock_budget_s: 540
+
+steps:
+  # Optional competition preamble: read the classification board first.
+  # - goto: {point: Classification_area, tol: 0.08}
+  # - read_board: {optional: true}
+
+  - goto:
+      point: Sorting_N
+      tol: 0.08
+  - pick:
+      class: cake             # change to clock/banana/doll to test other classes
+      station: N              # logging only; the arm picks at Sorting_*
+      attempts: 3
+
+  - goto:
+      point: Collection_A_approach
+      tol: 0.06
+  - place:
+      zone: A
+      level: 1                # mock_world.drop() has no level; the real arm does
+  - verify:
+      class: cake
+      zone: A
+      timeout_s: 3.0
+
+# Correspondence with the existing discrete mock (codes/mock_world.py):
+#   goto   -> goto_local(point)
+#   pick   -> pick(class)          (requires the robot to be at Sorting_*)
+#   place  -> drop()               (requires Collection_*)
+#   verify -> not implemented there; the spatial world (fake_world.py) does it.
