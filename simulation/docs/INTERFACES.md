@@ -182,7 +182,7 @@ stable (`/arm/pick`, `/arm/place`, `/arm/home`).
   "board_zones": ["B", "C", "D"],
   "zones": {"A": {"transport_center": [-1.0, 1.0], "collection_center": [-1.275, 1.275]}},
   "start_pose": {"x": -1.275, "y": 1.275, "yaw": -1.5708},
-  "points": {"Classification_area": [-0.9, 0.0], "Sorting_N": [0.0, 0.55]}
+  "points": {"Classification_area": [-0.9, 0.0], "Sorting_N": [0.0, 0.38]}
 }
 ```
 

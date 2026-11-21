@@ -32,7 +32,6 @@ WALL = 1.5
 ROBOT_RADIUS = 0.12
 FOV = math.radians(90.0)
 CAM_RANGE = 1.60
-ARM_REACH = 0.72
 LIDAR_RANGE = 3.5
 STEP_DT = 0.05
 
@@ -48,6 +47,7 @@ class RobotParams:
     ang_accel_rps2: float = 3.0        # keypatched2v.py MAX_ANG_ACCEL
     ang_decel_rps2: float = 8.0        # keypatched2v.py MAX_ANG_DECEL
     settle_s: float = 0.10
+    arm_reach_m: float = 0.45          # uArm ~0.32 m + mount offset + margin
     pick_s: float = 4.0
     place_s: float = 3.0
     frame_period_s: float = 0.10
@@ -273,7 +273,7 @@ class FakeWorld:
         candidates = [
             c for c in self.cubes
             if c.status == "field" and c.cls == ccls
-            and math.hypot(c.x - self.x, c.y - self.y) <= ARM_REACH
+            and math.hypot(c.x - self.x, c.y - self.y) <= self.p.arm_reach_m
         ]
         if not candidates:
             return False, ""
@@ -415,7 +415,7 @@ class SpatialPlatform:
         while self.world.t < deadline and not self.stop_requested():
             dx, dy = tx - self.world.x, ty - self.world.y
             dist = math.hypot(dx, dy)
-            if dist <= 0.06:
+            if dist <= 0.04:
                 break
             heading_error = wrap(math.atan2(dy, dx) - self.world.yaw)
             if abs(heading_error) > 0.60:
@@ -423,7 +423,7 @@ class SpatialPlatform:
                                  -self.world.p.max_angular_rps,
                                  self.world.p.max_angular_rps)
             else:
-                v = min(self.world.p.max_linear_mps, 0.90 * dist + 0.10)
+                v = min(self.world.p.max_linear_mps, max(0.05, 1.2 * dist))
                 w = clamp(1.60 * heading_error,
                           -self.world.p.max_angular_rps,
                           self.world.p.max_angular_rps)
@@ -444,7 +444,7 @@ class SpatialPlatform:
         self.world.stop()
         self.world.advance(self.world.p.settle_s)
 
-        return math.hypot(tx - self.world.x, ty - self.world.y) <= 0.08
+        return math.hypot(tx - self.world.x, ty - self.world.y) <= 0.05
 
     # -- perception ---------------------------------------------------------
 
@@ -486,7 +486,7 @@ class SpatialPlatform:
         return True, ""
 
     def approachable(self, x: float, y: float) -> bool:
-        return math.hypot(x - self.world.x, y - self.world.y) <= ARM_REACH
+        return math.hypot(x - self.world.x, y - self.world.y) <= self.world.p.arm_reach_m
 
     def clear_costmaps(self) -> None:
         pass

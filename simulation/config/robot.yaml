@@ -18,6 +18,10 @@ chassis:
   settle_s: 0.10             # runtask.py: post-move rospy.sleep(0.10)
 
 arm:
+  # Effective reach from the robot centre. uArm reaches ~0.32 m from its base
+  # (X 90..320 mm); the base sits ~0.10 m ahead of the chassis centre. This is an
+  # ESTIMATE - measure the real arm's reach before trusting station stand-offs.
+  arm_reach_m: 0.45
   pick_s: 4.0                # grasp(): 0.9 + 0.1 + 0.8 + 0.4 + 0.8 (~3.2 s) + margin
   place_s: 3.0               # drop(): 0.8 + 0.4 + 0.6 + 0.8 + 0.4 (~3.0 s)
 
