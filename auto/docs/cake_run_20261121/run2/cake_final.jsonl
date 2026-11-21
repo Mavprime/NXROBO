@@ -1,4 +1,0 @@
-{"ts": "2026-11-21T19:57:18", "result": null, "cake_pixel": [354.0, 120.0], "cake_top": null, "target": null, "contact_z": null, "scale": 0.386784}
-{"ts": "2026-11-21T20:00:49", "result": "PROBE", "cake_pixel": [356.0, 122.0], "cake_top": [318.1, -19.0, -25.3], "target": [318.1, -19.0], "contact_z": null, "scale": 0.386784}
-{"ts": "2026-11-21T20:01:28", "result": "PLACED", "cake_pixel": [354.0, 121.0], "cake_top": [319.5, -17.6, -25.8], "target": [319.5, -17.6], "contact_z": 40.0, "scale": 0.385861}
-{"ts": "2026-11-21T20:14:14", "result": "PLACED", "cake_pixel": [354.0, 121.0], "cake_top": [318.8, -17.4, -24.9], "target": [318.8, -17.4], "contact_z": 40.0, "scale": 0.386784}

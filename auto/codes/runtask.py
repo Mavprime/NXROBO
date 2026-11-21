@@ -629,7 +629,7 @@ class ArmAction:
                 self.drive_base(step_m)
                 rospy.sleep(0.4)
 
-            # (c) ЗАТЕМ: запустить алгоритм сканирования позиции кубика еще раз!
+            # (c) THEN: re-run cube position scanning algorithm!
             rospy.loginfo(f">> [GRASP] Re-scanning cube position after approach step #{approach_step}...")
             rescan_list = self.cam.detector(timeout=3.0)
             if rescan_list:

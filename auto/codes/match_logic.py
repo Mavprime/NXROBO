@@ -299,22 +299,21 @@ def load_cake_calibration(path=None):
 
 
 def pixel_to_cake_xy(M, u, v, fx=CAM_FX, fy=CAM_FY, cx=CAM_CX, cy=CAM_CY,
-                     calib_file=None, cup_offset_x=30.0):
+                     calib_file=None, cup_offset_x=125.0):
     """Dedicated approximation for the competition Cake (Tier 2 / 20 cm height).
 
     Uses the dedicated Layer 2 calibration (thefile2.txt) created specifically
     for the elevated Cake.
-    cup_offset_x = +30.0 mm (+3 cm) places the suction cup dead-center on the
-    Cake rather than on the front edge.
-    Safe reach limits are expanded specifically for Cake up to X = 350.0 mm
-    (supported by uArm Swift Pro firmware).
+    cup_offset_x = +125.0 mm places the suction cup dead-center on the Cake cube
+    (340-348 mm from arm base, compensating for detector finding vertical face).
+    Clamped at hardware arm kinematic boundary (348.0 mm).
     """
     x_kb, y_kb = load_cake_calibration(calib_file)
     cake_x = float(x_kb[0] * v + x_kb[1] + cup_offset_x)
     cake_y = float(y_kb[0] * u + y_kb[1])
-    # Expanded safe limits specifically for Cake (firmware supports up to 350 mm)
-    cake_x = max(120.0, min(350.0, cake_x))
-    cake_y = max(-190.0, min(190.0, cake_y))
+    # Clamped at hardware limit (348.0 mm) so IK never enters singularity
+    cake_x = max(120.0, min(348.0, cake_x))
+    cake_y = max(-220.0, min(220.0, cake_y))
     return cake_x, cake_y
 
 
@@ -577,7 +576,13 @@ def cluster_detections(frames, conf_threshold=CONF_THRESHOLD,
                 pass
             else:
                 continue
-        cid = Counter(cluster["ids"]).most_common(1)[0][0]
+        # Cake priority rule: only for elevated top cubes (y < 215 px), cake detections take precedence.
+        # Ground and pedestal clusters (y >= 215 px) use majority voting so banana pedestal isn't mislabeled.
+        mean_y = sum(cluster["ys"]) / len(cluster["ys"])
+        if mean_y < 215.0 and any(is_cake(c) for c in cluster["ids"]):
+            cid = CAKE_ID
+        else:
+            cid = Counter(cluster["ids"]).most_common(1)[0][0]
         x = int(round(sum(cluster["xs"]) / len(cluster["xs"])))
         y = int(round(sum(cluster["ys"]) / len(cluster["ys"])))
         cubes.append([cid, [x, y, 0]])

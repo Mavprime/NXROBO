@@ -236,7 +236,7 @@ def main():
                 arm.drive_base(step_m)
                 rospy.sleep(0.5)
 
-            # 3. ЗАТЕМ: запустить алгоритм сканирования позиции кубика еще раз!
+            # 3. THEN: re-run cube position scanning algorithm!
             print("[RE-SCAN] fresh scan of cube position after approach step #%d..." % approach_step)
             arm.arm_grasp_ready(block=True)
             rospy.sleep(0.4)
