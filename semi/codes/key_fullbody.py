@@ -58,7 +58,13 @@ Environment overrides
 ---------------------
     LIN_SPEED=0.15      m/s
     ANG_SPEED=0.6       rad/s
-    KEY_TIMEOUT=0.5     seconds of coast after the last repeated base key
+    KEY_TIMEOUT=0.25    release timeout once the key-repeat stream is running
+    HOLD_GRACE=0.7      timeout after a fresh press, before the first key repeat
+                        arrives (the terminal's repeat delay is usually ~0.5 s)
+    MAX_LIN_ACCEL=3.0   m/s^2 base acceleration
+    MAX_LIN_DECEL=3.0   m/s^2 base braking when the key is released
+    MAX_ANG_ACCEL=6.0   rad/s^2 turning acceleration
+    MAX_ANG_DECEL=6.0   rad/s^2 turning braking
     JOINT_STEP=10       degrees added per arm key press
     JOINT_SPEED=60      deg/s slew rate for the arm
     ARM_TIMEOUT=0.3     seconds after the last arm key before the target is dropped
@@ -113,7 +119,12 @@ CART_LIMITS = {"x": (0.0, 350.0), "y": (-160.0, 160.0), "z": (-60.0, 170.0)}
 
 LIN_SPEED = float(os.environ.get("LIN_SPEED", "0.15"))       # m/s
 ANG_SPEED = float(os.environ.get("ANG_SPEED", "0.6"))        # rad/s
-KEY_TIMEOUT = float(os.environ.get("KEY_TIMEOUT", "0.5"))    # s
+KEY_TIMEOUT = float(os.environ.get("KEY_TIMEOUT", "0.25"))   # s
+HOLD_GRACE = float(os.environ.get("HOLD_GRACE", "0.7"))      # s
+MAX_LIN_ACCEL = float(os.environ.get("MAX_LIN_ACCEL", "3.0"))  # m/s^2
+MAX_LIN_DECEL = float(os.environ.get("MAX_LIN_DECEL", "3.0"))  # m/s^2
+MAX_ANG_ACCEL = float(os.environ.get("MAX_ANG_ACCEL", "6.0"))  # rad/s^2
+MAX_ANG_DECEL = float(os.environ.get("MAX_ANG_DECEL", "6.0"))  # rad/s^2
 JOINT_STEP = float(os.environ.get("JOINT_STEP", "10"))       # deg / press
 JOINT_SPEED = float(os.environ.get("JOINT_SPEED", "60"))     # deg / s
 ARM_TIMEOUT = float(os.environ.get("ARM_TIMEOUT", "0.3"))    # s
@@ -233,6 +244,17 @@ def pose_ok(x, y, z):
 
 def clamp(value, limits):
     return min(max(value, limits[0]), limits[1])
+
+
+def smooth_velocity(current, target, accel, decel, dt):
+    """Ramp toward the target with separate acceleration and braking limits."""
+    diff = target - current
+    is_braking = (current > 0 and target < current) or (current < 0 and target > current)
+    rate = decel if is_braking else accel
+    max_change = rate * dt
+    if abs(diff) <= max_change:
+        return target
+    return current + (max_change if diff > 0 else -max_change)
 
 
 class Arm:
@@ -408,11 +430,15 @@ def main():
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
 
+    target_linear = target_angular = 0.0
     linear = angular = 0.0
     last_base_key = 0.0
+    last_base_char = ""
+    hold_timeout = HOLD_GRACE
     last_arm_key = 0.0
     pump_on = False
     last_loop = time.time()
+    rate = rospy.Rate(20)         # matches the Spark base serial driver
 
     try:
         tty.setraw(fd)
@@ -421,22 +447,42 @@ def main():
             dt = min(max(now - last_loop, 0.0), 0.1)
             last_loop = now
 
-            ready, _, _ = select.select([sys.stdin], [], [], 0.02)
-            if ready:
+            # Drain all pending keys without blocking the 20 Hz control loop.
+            stop = False
+            while select.select([sys.stdin], [], [], 0)[0]:
                 char = os.read(fd, 1).decode(errors="ignore")
+                if not char:
+                    break
 
                 if char == "\x03":                       # Ctrl+C
+                    stop = True
                     break
                 elif char in "wWaAsSdD":                 # base
                     key = char.lower()
                     if key == "w":
-                        linear, angular = LIN_SPEED, 0.0
+                        target_linear, target_angular = LIN_SPEED, 0.0
                     elif key == "s":
-                        linear, angular = -LIN_SPEED, 0.0
+                        target_linear, target_angular = -LIN_SPEED, 0.0
                     elif key == "a":
-                        linear, angular = 0.0, ANG_SPEED
+                        target_linear, target_angular = 0.0, ANG_SPEED
                     elif key == "d":
-                        linear, angular = 0.0, -ANG_SPEED
+                        target_linear, target_angular = 0.0, -ANG_SPEED
+
+                    # A terminal sends no key-up event: the only release signal
+                    # is a pause in key repeats. The OS sends the FIRST repeat
+                    # only after its repeat delay (~0.5 s), so a short timeout
+                    # would brake right after the press. Use a long grace for a
+                    # fresh press, then a short timeout once repeats are flowing.
+                    gap = now - last_base_key
+                    if key != last_base_char or gap > HOLD_GRACE:
+                        # Fresh press or direction change: the first repeat is
+                        # delayed by the terminal's key-repeat delay (~0.5 s),
+                        # so do not brake until it has had time to arrive.
+                        hold_timeout = HOLD_GRACE
+                    else:
+                        # Repeats are flowing: use the crisp release timeout.
+                        hold_timeout = KEY_TIMEOUT
+                    last_base_char = key
                     last_base_key = now
                 elif char in "482769":                   # arm joints
                     last_arm_key = now
@@ -458,6 +504,7 @@ def main():
                     pump_on = False
                     set_pump(False)
                     set_base(0.0, 0.0)
+                    target_linear = target_angular = 0.0
                     linear = angular = 0.0
                     if pos_pub.get_num_connections() == 0:
                         print("RELEASE - arm driver not running, home not sent")
@@ -468,9 +515,20 @@ def main():
                         print("RELEASE + HOME  (a0=%.1f a1=%.1f a2=%.1f)"
                               % tuple(arm.current))
 
-            # Base: stop after the last repeated key.
-            if now - last_base_key > KEY_TIMEOUT:
-                linear = angular = 0.0
+            if stop:
+                break
+
+            # Base: the terminal has no key-up event, so the timeout is the
+            # key release. hold_timeout is short while repeats are flowing and
+            # long only during the initial key-repeat delay of a fresh press.
+            if now - last_base_key > hold_timeout:
+                target_linear = target_angular = 0.0
+
+            # Slew the published velocity so starts and stops are smooth.
+            linear = smooth_velocity(linear, target_linear,
+                                     MAX_LIN_ACCEL, MAX_LIN_DECEL, dt)
+            angular = smooth_velocity(angular, target_angular,
+                                      MAX_ANG_ACCEL, MAX_ANG_DECEL, dt)
             set_base(linear, angular)
 
             # Arm: drop the remaining target when the key has been released.
@@ -483,7 +541,7 @@ def main():
                 if (x, y, z) != arm.last_pose or moved:
                     publish_pose(x, y, z)
 
-            rospy.sleep(0.005)
+            rate.sleep()
 
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
