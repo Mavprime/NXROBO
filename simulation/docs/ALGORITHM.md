@@ -424,7 +424,7 @@ Level 0 acceptance:
    bottom-right, D bottom-left; collection centres at ±1.275 m; start in A. Confirm
    against the real field when the arena is built.
 2. **Station poses** — `Sorting_N/S/E/W` in `scenario.json` are approximate stand-ins
-   ((0, ±0.55), (±0.55, 0)). Production also has `Sorting_M` for the cake, but the sim
+   ((0, ±0.38), (±0.38, 0)). Production also has `Sorting_M` for the cake, but the sim
    has no `M`: the cake sits on the centre brick and is picked from any `Sorting_*`
    approach. Decide whether to add `M` to the map or change `CAKE_SORTING_STATION`.
 3. **Board read position** — `make_arena.py` puts the board on the sorting table on the

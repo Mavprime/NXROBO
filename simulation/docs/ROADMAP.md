@@ -53,7 +53,7 @@ way `auto/codes/match_logic.py` is used now.
 ### Acceptance
 
 - [x] Demo mission (`config/mission_demo.yaml`) completes in seeds 0–9 (score 3,
-  27.6 s simulated at measured chassis speeds, 0 collisions; V2 verification passes).
+  29.3 s simulated at measured chassis speeds, 0 collisions; V2 verification passes).
 - [ ] All 7 injected faults from `ALGORITHM.md` §6 behave as specified **in the spatial
   world** (gate logic is unit-tested; scenario-level injection is not wired yet).
 - [x] Unit tests cover: G1 voting, G2 belief revision, G3 conflict revision, G5 clock

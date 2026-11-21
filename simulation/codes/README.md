@@ -46,10 +46,11 @@ python3 mock_world.py --runs 200           # Monte Carlo baseline (strategy leve
   not measured.
 - **Visualisation (discrete):** `runs/mission_demo_seed*.png` shows the arena, bricks,
   board, the numbered path and the step table; the matching `.gif` animates the robot.
-- **Spatial run (Level 0B):** seeds 0–9 all `DONE`, score 3, **27.6 s** simulated at
-  measured chassis speeds (0.18 m/s, 0.75 rad/s), 0 collisions; `verify` is now `ok`
-  (the discrete mock could only say `unverified`). Breakdown: goto 10.8 s, pick 4.5 s,
-  goto 8.8 s, place 3.0 s, verify 0.5 s — see `docs/TIMING.md`.
+- **Spatial run (Level 0B):** seeds 0–9 all `DONE`, score 3, **29.3 s** simulated at
+  measured chassis speeds (0.18 m/s, 0.75 rad/s) and a realistic arm reach (0.45 m
+  effective), 0 collisions; `verify` is now `ok` (the discrete mock could only say
+  `unverified`). Breakdown: goto 11.7 s, pick 4.5 s, goto 9.6 s, place 3.0 s,
+  verify 0.5 s — see `docs/TIMING.md`.
 - **Live view:** `run_live.py` serves `http://127.0.0.1:8090/` — robot, lidar, trail,
   cubes, score and step list update in real time. Verified end-to-end over HTTP.
 

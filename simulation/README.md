@@ -24,7 +24,7 @@ implements it.
 - [x] **Level 0B — spatial world** — `codes/fake_world.py`: continuous differential
   drive, raycast lidar, camera detections with poses, mocked arm and scoring.
   `codes/run_live.py` + `codes/live_view.py` serve a live browser view. Demo completes
-  10/10 seeds (score 3, 27.6 s at measured chassis speeds, 0 collisions); `verify` is
+  10/10 seeds (score 3, 29.3 s at measured chassis speeds, 0 collisions); `verify` is
   now `ok`. Per-step timings are in [`docs/TIMING.md`](docs/TIMING.md).
   Not ROS topics yet — the ROS adapter is still pending.
 - [ ] Level 1 — Gazebo Classic + `move_base` + static map
@@ -39,6 +39,7 @@ simulation/
 │   ├── ALGORITHM.md           # mission FSM, agreement gate, pseudocode, failure policy
 │   ├── INTERFACES.md          # ROS topics/services, arm contract, config schemas, RViz
 │   ├── TIMING.md              # measured speeds, per-step timing, calibration
+│   ├── FIELD_RISKS.md         # sim → real risk register + pre-flight checklist
 │   └── ROADMAP.md             # staged plan, prerequisites, acceptance criteria, risks
 ├── config/
 │   ├── robot.yaml             # measured chassis/arm parameters + sources

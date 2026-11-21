@@ -14,6 +14,7 @@ All values live in [`config/robot.yaml`](../config/robot.yaml).
 | Linear accel / decel | **3.0 / 5.0 m/s²** | `auto/codes/keypatched2v.py:75-76` |
 | Angular accel / decel | **3.0 / 8.0 rad/s²** | `auto/codes/keypatched2v.py:77-78` |
 | Post-move settle | **0.10 s** | `runtask.py:525,555` |
+| Arm reach (from robot centre) | **0.45 m** (estimate) | uArm ≈0.32 m from its base + ~0.10 m mount offset + margin; **measure this** |
 | Pick duration | **4.0 s** (estimate) | `runtask.grasp()` delays: 0.9 + 0.1 + 0.8 + 0.4 + 0.8 ≈ 3.2 s + margin |
 | Place duration | **3.0 s** (estimate) | `runtask.drop()`/`pick_direct` delays: 0.8 + 0.4 + 0.6 + 0.8 + 0.4 ≈ 3.0 s |
 | Detection frame period | **0.10 s** | 10 Hz voting window (`GRASP_FRAMES`) |
@@ -36,12 +37,12 @@ bound.
 
 | Step | Simulated time |
 |---|---:|
-| goto Sorting_N | 10.8 s |
+| goto Sorting_N | 11.7 s |
 | pick cake | 4.5 s (4.0 arm + 0.5 scan) |
-| goto Collection_A_approach | 8.8 s |
+| goto Collection_A_approach | 9.6 s |
 | place cake | 3.0 s |
 | verify cake | 0.5 s |
-| **total** | **27.6 s** |
+| **total** | **29.3 s** |
 
 Score 3, zero collisions. This is the number to compare against a physical run.
 
@@ -59,7 +60,7 @@ Score 3, zero collisions. This is the number to compare against a physical run.
    battery voltage effects.**
 5. **Tower stacking.** Only level 1 is modelled.
 
-So treat 27.6 s as the **drive + arm baseline at production speeds**, not a guarantee.
+So treat 29.3 s as the **drive + arm baseline at production speeds**, not a guarantee.
 A real run of the same mission will likely be somewhat longer until the nav stack is
 tuned.
 

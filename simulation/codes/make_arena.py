@@ -118,8 +118,8 @@ def build(seed):
 
     pts = {
         "Classification_area": [-0.90, 0.0],
-        "Sorting_N": [0.0, 0.55], "Sorting_W": [-0.55, 0.0],
-        "Sorting_S": [0.0, -0.55], "Sorting_E": [0.55, 0.0],
+        "Sorting_N": [0.0, 0.38], "Sorting_W": [-0.38, 0.0],
+        "Sorting_S": [0.0, -0.38], "Sorting_E": [0.38, 0.0],
     }
     for z, (sx, sy) in ZONES.items():
         # Red collection square centre (0.45 x 0.45 m in the corner).
