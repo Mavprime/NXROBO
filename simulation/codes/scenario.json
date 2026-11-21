@@ -1,0 +1,207 @@
+{
+  "seed": 3,
+  "bricks": [
+    {
+      "name": "brick_1_1",
+      "type": "clock",
+      "row": 1,
+      "col": 1,
+      "layer": 1,
+      "x": 0.0,
+      "y": 0.0
+    },
+    {
+      "name": "brick_0_0",
+      "type": "doll",
+      "row": 0,
+      "col": 0,
+      "layer": 1,
+      "x": -0.14500000000000002,
+      "y": 0.14500000000000002
+    },
+    {
+      "name": "brick_0_1",
+      "type": "banana",
+      "row": 0,
+      "col": 1,
+      "layer": 1,
+      "x": 0.0,
+      "y": 0.14500000000000002
+    },
+    {
+      "name": "brick_0_2",
+      "type": "doll",
+      "row": 0,
+      "col": 2,
+      "layer": 1,
+      "x": 0.14500000000000002,
+      "y": 0.14500000000000002
+    },
+    {
+      "name": "brick_1_0",
+      "type": "doll",
+      "row": 1,
+      "col": 0,
+      "layer": 1,
+      "x": -0.14500000000000002,
+      "y": 0.0
+    },
+    {
+      "name": "brick_1_2",
+      "type": "banana",
+      "row": 1,
+      "col": 2,
+      "layer": 1,
+      "x": 0.14500000000000002,
+      "y": 0.0
+    },
+    {
+      "name": "brick_2_0",
+      "type": "clock",
+      "row": 2,
+      "col": 0,
+      "layer": 1,
+      "x": -0.14500000000000002,
+      "y": -0.14500000000000002
+    },
+    {
+      "name": "brick_2_1",
+      "type": "clock",
+      "row": 2,
+      "col": 1,
+      "layer": 1,
+      "x": 0.0,
+      "y": -0.14500000000000002
+    },
+    {
+      "name": "brick_2_2",
+      "type": "banana",
+      "row": 2,
+      "col": 2,
+      "layer": 1,
+      "x": 0.14500000000000002,
+      "y": -0.14500000000000002
+    },
+    {
+      "name": "cake",
+      "type": "cake",
+      "row": 1,
+      "col": 1,
+      "layer": 2,
+      "x": 0.0,
+      "y": 0.0
+    }
+  ],
+  "board_left_to_right": [
+    "clock",
+    "banana",
+    "doll"
+  ],
+  "board_zones": [
+    "B",
+    "C",
+    "D"
+  ],
+  "zones": {
+    "A": {
+      "transport_center": [
+        -1.0,
+        1.0
+      ],
+      "collection_center": [
+        -1.275,
+        1.275
+      ]
+    },
+    "B": {
+      "transport_center": [
+        1.0,
+        1.0
+      ],
+      "collection_center": [
+        1.275,
+        1.275
+      ]
+    },
+    "C": {
+      "transport_center": [
+        1.0,
+        -1.0
+      ],
+      "collection_center": [
+        1.275,
+        -1.275
+      ]
+    },
+    "D": {
+      "transport_center": [
+        -1.0,
+        -1.0
+      ],
+      "collection_center": [
+        -1.275,
+        -1.275
+      ]
+    }
+  },
+  "start_pose": {
+    "x": -1.275,
+    "y": 1.275,
+    "yaw": -1.5708
+  },
+  "points": {
+    "Classification_area": [
+      -0.9,
+      0.0
+    ],
+    "Sorting_N": [
+      0.0,
+      0.55
+    ],
+    "Sorting_W": [
+      -0.55,
+      0.0
+    ],
+    "Sorting_S": [
+      0.0,
+      -0.55
+    ],
+    "Sorting_E": [
+      0.55,
+      0.0
+    ],
+    "Collection_A": [
+      -1.275,
+      1.275
+    ],
+    "Collection_A_approach": [
+      -1.0275126265847083,
+      1.0275126265847083
+    ],
+    "Collection_B": [
+      1.275,
+      1.275
+    ],
+    "Collection_B_approach": [
+      1.0275126265847083,
+      1.0275126265847083
+    ],
+    "Collection_C": [
+      1.275,
+      -1.275
+    ],
+    "Collection_C_approach": [
+      1.0275126265847083,
+      -1.0275126265847083
+    ],
+    "Collection_D": [
+      -1.275,
+      -1.275
+    ],
+    "Collection_D_approach": [
+      -1.0275126265847083,
+      -1.0275126265847083
+    ]
+  },
+  "note": "points are approximate stand-ins; real ones come from your mapping step"
+}
