@@ -7,15 +7,15 @@
 ## 📁 Расположение инструментов и файлов на вашем компьютере
 
 * **MobaXterm (SSH-клиент)**:
-  `D:\ROS competition\MobaXterm\MobaXterm\MobaXterm.exe`
+  `D:\NXROBO\MobaXterm\MobaXterm\MobaXterm.exe`
 * **Инструменты отладки (HDC, VNC)**:
-  `D:\ROS competition\spark_humble_ws\M-Robots 半自动赛资料\Tools\`
+  `D:\NXROBO\spark_humble_ws\M-Robots 半自动赛资料\Tools\`
   * `hdc.exe` и `libusb_shared.dll` — определение IP робота по кабелю
   * `VNC_Viewer_v7.8.0.exe` — просмотр экрана RViz и камер
 * **Ваши скрипты управления**:
-  `D:\ROS competition\spark_humble_ws\codes\` (`keypatched2v.py`, `keypatched.py` и др.)
+  `D:\NXROBO\spark_humble_ws\codes\` (`keypatched2v.py`, `keypatched.py` и др.)
 * **Документация организаторов**:
-  `D:\ROS competition\spark_humble_ws\M-Robots 半自动赛资料\说明文档\`
+  `D:\NXROBO\spark_humble_ws\M-Robots 半自动赛资料\说明文档\`
 
 ---
 
@@ -35,7 +35,7 @@
 1. Подключите провод USB Type-C от ноутбука к порту **USB-OTG / Host** на главной плате робота.
 2. На ноутбуке откройте PowerShell и выполните:
    ```powershell
-   cd "D:\ROS competition\spark_humble_ws\M-Robots 半自动赛资料\Tools"
+   cd "D:\NXROBO\spark_humble_ws\M-Robots 半自动赛资料\Tools"
    .\hdc.exe shell ifconfig
    ```
 3. Найдите блок интерфейса **`wlan0`** и строчку `inet addr: 10.x.x.x` (или `192.168.x.x`). Запомните этот IP.
@@ -97,7 +97,7 @@
 ### Вариант 2. Загрузка нового файла с компьютера
 1. В левой панели MobaXterm откройте папку:
    `/data/local/release/usr/lib/semi_auto_match_24/`
-2. Перетащите мышкой файл (например, `keypatched2v.py` из `D:\ROS competition\spark_humble_ws\codes\`) из Проводника Windows в окно MobaXterm.
+2. Перетащите мышкой файл (например, `keypatched2v.py` из `D:\NXROBO\spark_humble_ws\codes\`) из Проводника Windows в окно MobaXterm.
 3. В терминале робота обязательно **дайте файлу права на запуск**:
    ```bash
    chmod +x /data/local/release/usr/lib/semi_auto_match_24/keypatched2v.py
@@ -178,7 +178,7 @@ SPEED_MODES = {
 Когда запущено меню `./onekey.sh`, на роботе автоматически стартует VNC-сервер.
 
 1. На ноутбуке запустите:
-   `D:\ROS competition\spark_humble_ws\M-Robots 半自动赛资料\Tools\VNC_Viewer_v7.8.0.exe`
+   `D:\NXROBO\spark_humble_ws\M-Robots 半自动赛资料\Tools\VNC_Viewer_v7.8.0.exe`
 2. В строку подключения введите:
    `<IP_робота>:5900` (например, `10.24.88.146:5900`)
 3. Нажмите **Connect**.

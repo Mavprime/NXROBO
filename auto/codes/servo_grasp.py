@@ -33,6 +33,7 @@ from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 
 import match_logic
+from match_logic import pixel_to_xy_at_z
 from calib_pad import pad_pixel, grab
 from runtask import CamAction, ArmAction, CAM_FX, CAM_FY, CAM_CX, CAM_CY
 try:                       # older runtask.py variants have no voting window
@@ -45,39 +46,6 @@ except ImportError:
 PAD_VISIBLE_X = 235.0
 #: Comfortable working extension the base backs off to.
 TARGET_X = 250.0
-
-
-def pixel_to_xy_at_z(M, u, v, z,
-                     fx=CAM_FX, fy=CAM_FY, cx=CAM_CX, cy=CAM_CY):
-    """Closed-form inversion of the projective map at a fixed height.
-
-    At constant z the projection arm->pixel is a homography, so the inverse is
-    just a 2x2 linear solve.  runtask.py's ``pixel_to_arm_at_z`` does the same
-    job with 30 Newton steps on a clipped step and was observed to land 2-4 cm
-    away on this robot; this version cannot drift.
-    """
-    up = (u - cx) / fx
-    vp = (v - cy) / fy
-    # M is (4,3): M[j][k] = coefficient of arm coord j for camera axis k, so
-    # the camera-axis coefficient vectors are COLUMNS of M.
-    r0, r1, r2 = M[:, 0], M[:, 1], M[:, 2]
-    A0, B0, A2, B2 = r0[0], r0[1], r2[0], r2[1]
-    A1, B1 = r1[0], r1[1]
-    C0 = r0[2] * z + r0[3]
-    C1 = r1[2] * z + r1[3]
-    C2 = r2[2] * z + r2[3]
-    a11 = A0 - up * A2
-    a12 = B0 - up * B2
-    a21 = A1 - vp * A2
-    a22 = B1 - vp * B2
-    b1 = up * C2 - C0
-    b2 = vp * C2 - C1
-    det = a11 * a22 - a12 * a21
-    if abs(det) < 1e-12:
-        return None
-    x = (b1 * a22 - a12 * b2) / det
-    y = (a11 * b2 - b1 * a21) / det
-    return float(x), float(y)
 
 
 def first_guess(cam, u, v, z, x0=250.0, y0=0.0):

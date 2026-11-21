@@ -28,6 +28,7 @@ Conventions used everywhere below
 """
 
 import math
+import os
 import time
 from collections import Counter
 
@@ -236,6 +237,18 @@ CAM_CX = 315.03875732421875
 CAM_CY = 249.8477020263672
 
 
+def matrix_columns(M):
+    """Columns of a 4x3 matrix: works for numpy arrays and plain lists.
+
+    ``pixel_to_xy_at_z`` is called both with the np.load()-ed calibration and
+    with hand-written lists from the unit tests, so no slicing syntax that only
+    numpy understands.
+    """
+    return ([M[i][0] for i in range(4)],
+            [M[i][1] for i in range(4)],
+            [M[i][2] for i in range(4)])
+
+
 def pixel_to_xy_at_z(M, u, v, z,
                      fx=CAM_FX, fy=CAM_FY, cx=CAM_CX, cy=CAM_CY):
     """Closed-form inverse of the 3D projective map at a fixed height z (mm).
@@ -245,7 +258,7 @@ def pixel_to_xy_at_z(M, u, v, z,
     """
     up = (u - cx) / fx
     vp = (v - cy) / fy
-    r0, r1, r2 = M[:, 0], M[:, 1], M[:, 2]
+    r0, r1, r2 = matrix_columns(M)
     C0 = r0[2] * z + r0[3]
     C1 = r1[2] * z + r1[3]
     C2 = r2[2] * z + r2[3]
@@ -259,6 +272,50 @@ def pixel_to_xy_at_z(M, u, v, z,
     if abs(det) < 1e-12:
         return None
     return float((b1 * a22 - a12 * b2) / det), float((a11 * b2 - b1 * a21) / det)
+
+
+def load_cake_calibration(path=None):
+    """Load the dedicated Layer 2 (Cake) calibration parameters (k1, b1, k2, b2)."""
+    if path is None:
+        candidates = [
+            os.path.expanduser("~/thefile2.txt"),
+            os.path.join(os.path.dirname(__file__), "thefile2.txt"),
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                path = c
+                break
+    if path and os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                vals = [float(v) for v in f.read().split()]
+                if len(vals) >= 4:
+                    return (vals[0], vals[1]), (vals[2], vals[3])
+        except Exception:
+            pass
+    # Built-in fallback parameters from shipped thefile2.txt:
+    # -0.8030661953564442 395.53156305089396 -0.6955960479077558 247.96237774624151
+    return (-0.8030661953564442, 395.53156305089396), (-0.6955960479077558, 247.96237774624151)
+
+
+def pixel_to_cake_xy(M, u, v, fx=CAM_FX, fy=CAM_FY, cx=CAM_CX, cy=CAM_CY,
+                     calib_file=None, cup_offset_x=30.0):
+    """Dedicated approximation for the competition Cake (Tier 2 / 20 cm height).
+
+    Uses the dedicated Layer 2 calibration (thefile2.txt) created specifically
+    for the elevated Cake.
+    cup_offset_x = +30.0 mm (+3 cm) places the suction cup dead-center on the
+    Cake rather than on the front edge.
+    Safe reach limits are expanded specifically for Cake up to X = 350.0 mm
+    (supported by uArm Swift Pro firmware).
+    """
+    x_kb, y_kb = load_cake_calibration(calib_file)
+    cake_x = float(x_kb[0] * v + x_kb[1] + cup_offset_x)
+    cake_y = float(y_kb[0] * u + y_kb[1])
+    # Expanded safe limits specifically for Cake (firmware supports up to 350 mm)
+    cake_x = max(120.0, min(350.0, cake_x))
+    cake_y = max(-190.0, min(190.0, cake_y))
+    return cake_x, cake_y
 
 
 def pixel_to_arm(pixel_row, pixel_col, x_kb, y_kb):
@@ -298,7 +355,20 @@ def ik_reachable(x, y, z):
         upper = MATH_UPPER_LOWER
         right_all = (sqrt_zx * sqrt_zx + upper * upper - 1) / (2 * upper * sqrt_zx)
         left_all = (sqrt_zx * sqrt_zx + 1 - upper * upper) / (2 * sqrt_zx)
-        return abs(right_all) <= 1 and abs(left_all) <= 1
+        if abs(right_all) > 1 or abs(left_all) > 1:
+            return False
+
+        phi = math.atan2(z_in, x_in) * MATH_TRANS
+        angle_right = math.acos(right_all) * MATH_TRANS - phi
+        angle_left = math.acos(left_all) * MATH_TRANS + phi
+
+        # Firmware/hardware mechanical limits (uArm Swift Pro):
+        # theta1 (lower arm): [0.0, 135.6] deg
+        # theta2 (upper arm / elbow): [0.0, 100.7] deg (cannot be negative)
+        # combined span: [10.0, 151.0] deg
+        return (0.0 <= angle_left <= 135.6 and
+                0.0 <= angle_right <= 100.7 and
+                10.0 <= (angle_left + angle_right) <= 151.0)
     except Exception:
         return False
 
@@ -307,6 +377,136 @@ def pixel_reachable(pixel_row, pixel_col, z_list, x_kb, y_kb):
     """True if the pixel is reachable at every height in ``z_list``."""
     arm_x, arm_y = pixel_to_arm(pixel_row, pixel_col, x_kb, y_kb)
     return all(ik_reachable(arm_x, arm_y, z) for z in z_list)
+
+
+# --------------------------------------------------------------------------
+# Hand-eye calibration guards
+# --------------------------------------------------------------------------
+# A stale hand-eye matrix is the most expensive silent failure in this
+# project: a cube pixel is converted to an arm target that is 5-7 cm off, the
+# arm descends into empty space, and nothing reports an error.  These helpers
+# catch the cheap cases at startup (missing/corrupted/degenerate matrix, wrong
+# units) and give the operator one number to look at after the camera moves.
+
+CALIB_IMAGE_SIZE = (640, 480)      # D435 color stream
+CALIB_SCALE_RANGE = (0.3, 3.0)     # px per mm at the grasp workspace
+CALIB_MAX_ROUNDTRIP_MM = 25.0      # project -> inverse must come back
+CALIB_WORKSPACE_PROBE = (270.0, 0.0, -50.0)   # centre of the grasp workspace
+CALIB_ROUNDTRIP_Z = (-100.0, -50.0, 0.0)
+
+
+def project_arm(M, x, y, z, fx=CAM_FX, fy=CAM_FY, cx=CAM_CX, cy=CAM_CY):
+    """Project an arm-frame wrist point (mm) into the color image.
+
+    Returns ``(u, v)`` in pixels, or ``None`` when the point is behind the
+    camera.  This is the forward direction of the same 4x3 matrix that
+    ``pixel_to_xy_at_z`` inverts.
+    """
+    try:
+        cam = [x * M[0][j] + y * M[1][j] + z * M[2][j] + M[3][j]
+               for j in range(3)]
+        if cam[2] <= 1e-9:
+            return None
+        return (fx * cam[0] / cam[2] + cx, fy * cam[1] / cam[2] + cy)
+    except Exception:
+        return None
+
+
+def pad_projection_error(M, pose, observed_uv):
+    """Pixel distance between the projected wrist pose and the seen pad.
+
+    ``pose`` is the commanded (x, y, z) in mm; ``observed_uv`` is the orange
+    pad centroid detected in the frame.  Returns ``None`` if the pose is not
+    projectable.
+    """
+    projected = project_arm(M, pose[0], pose[1], pose[2])
+    if projected is None:
+        return None
+    return math.hypot(projected[0] - observed_uv[0],
+                      projected[1] - observed_uv[1])
+
+
+def check_transform(M, fx=CAM_FX, fy=CAM_FY, cx=CAM_CX, cy=CAM_CY):
+    """Numeric sanity check of a 4x3 camera<-arm matrix.
+
+    Returns ``(ok, problems, stats)``.  ``problems`` is a list of human
+    readable strings (empty when ok); ``stats`` carries the numbers worth
+    logging: px/mm at the workspace and the project->inverse round-trip error.
+
+    This cannot detect a camera that was physically moved after calibration -
+    only the active pad check can (``calib3d.py --check`` / the startup check).
+    It does catch the other ways a calibration file goes bad: truncated or
+    non-numeric file, NaN/inf, a degenerate fit whose inverse returns garbage,
+    and a workspace that projects outside the image.
+    """
+    problems = []
+    stats = {}
+    try:
+        if len(M) != 4 or any(len(row) != 3 for row in M):
+            return False, ["matrix is not 4x3"], {}
+        rows = [[float(value) for value in row] for row in M]
+    except Exception as exc:
+        return False, ["matrix is not a 4x3 array of numbers (%s)" % exc], {}
+
+    if not all(math.isfinite(value) for row in rows for value in row):
+        return False, ["matrix contains NaN/inf"], {}
+
+    # Volume of the linear part: a collapsed fit (all points on one plane)
+    # passes every other check but inverts to garbage.
+    a, b, c = rows[0][:3]
+    d, e, f = rows[1][:3]
+    g, h, i = rows[2][:3]
+    det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+    if abs(det) < 1e-15:
+        problems.append("linear part is degenerate (det=%.3g)" % det)
+
+    centre = project_arm(rows, *CALIB_WORKSPACE_PROBE, fx=fx, fy=fy, cx=cx, cy=cy)
+    if centre is None:
+        problems.append("workspace centre projects behind the camera")
+    else:
+        width, height = CALIB_IMAGE_SIZE
+        stats["workspace_uv"] = (round(centre[0], 1), round(centre[1], 1))
+        if not (-0.5 * width <= centre[0] <= 1.5 * width
+                and -0.5 * height <= centre[1] <= 1.5 * height):
+            problems.append(
+                "workspace centre projects far outside the image at (%.0f, %.0f)"
+                % centre)
+
+    nearby = project_arm(rows, CALIB_WORKSPACE_PROBE[0] + 10.0,
+                         CALIB_WORKSPACE_PROBE[1], CALIB_WORKSPACE_PROBE[2],
+                         fx=fx, fy=fy, cx=cx, cy=cy)
+    if centre is not None and nearby is not None:
+        scale = math.hypot(nearby[0] - centre[0], nearby[1] - centre[1]) / 10.0
+        stats["px_per_mm"] = round(scale, 3)
+        low, high = CALIB_SCALE_RANGE
+        if not low <= scale <= high:
+            problems.append(
+                "scale is %.3f px/mm, outside %.1f-%.1f (wrong units?)"
+                % (scale, low, high))
+
+    worst = 0.0
+    for z in CALIB_ROUNDTRIP_Z:
+        projected = project_arm(rows, CALIB_WORKSPACE_PROBE[0],
+                                CALIB_WORKSPACE_PROBE[1], z,
+                                fx=fx, fy=fy, cx=cx, cy=cy)
+        if projected is None:
+            problems.append("z=%.0f projects behind the camera" % z)
+            continue
+        back = pixel_to_xy_at_z(rows, projected[0], projected[1], z,
+                                fx=fx, fy=fy, cx=cx, cy=cy)
+        if back is None:
+            problems.append("z=%.0f inverse is degenerate" % z)
+            continue
+        error = math.hypot(back[0] - CALIB_WORKSPACE_PROBE[0],
+                           back[1] - CALIB_WORKSPACE_PROBE[1])
+        worst = max(worst, error)
+    stats["roundtrip_mm"] = round(worst, 2)
+    if worst > CALIB_MAX_ROUNDTRIP_MM:
+        problems.append(
+            "project->inverse round-trip error is %.0f mm (limit %.0f)"
+            % (worst, CALIB_MAX_ROUNDTRIP_MM))
+
+    return (not problems), problems, stats
 
 
 # --------------------------------------------------------------------------
@@ -371,7 +571,12 @@ def cluster_detections(frames, conf_threshold=CONF_THRESHOLD,
     cubes = []
     for cluster in clusters:
         if len(cluster["ids"]) < min_hits:
-            continue
+            # Operator requirement: Cake priority rule. If a cluster contains Cake,
+            # it must not be discarded even if detected in fewer frames than other cubes.
+            if any(is_cake(c) for c in cluster["ids"]):
+                pass
+            else:
+                continue
         cid = Counter(cluster["ids"]).most_common(1)[0][0]
         x = int(round(sum(cluster["xs"]) / len(cluster["xs"])))
         y = int(round(sum(cluster["ys"]) / len(cluster["ys"])))
@@ -414,6 +619,10 @@ def select_grasp_candidate(cubes, preferred_id=None, center_x=320.0, y_ref=260.0
         same_class = [c for c in pool if c[0] == preferred_id]
         if same_class:
             pool = same_class
+    else:
+        cake_candidates = [c for c in pool if is_cake(c[0])]
+        if cake_candidates:
+            pool = cake_candidates
 
     # If any two candidates are vertical duplicates of the same physical cube
     # (top face vs front/bottom face, separated by <= 90 px vertically and <= 45 px horizontally),

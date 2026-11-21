@@ -36,7 +36,7 @@ if platform.system() != 'Windows':
 
 # Everything below this confidence is published; the FSM applies its own,
 # stricter grasp threshold (match_logic.CONF_THRESHOLD).
-PUBLISH_CONF = 0.35
+PUBLISH_CONF = 0.25
 
 # Only competition classes are meaningful downstream. items_config.yaml also
 # declares ``base: 99`` and YOLO happily detects the robot's own base at 0.95,
@@ -53,8 +53,10 @@ class SparkDetect:
         self.dedupe_px = float(dedupe_px)
         rospy.loginfo(f">> [SPARK-DETECT] Loading model 1: {model_path_1}")
         self.model_1 = yolov5.load(model_path_1)
+        self.model_1.conf = 0.03
         rospy.loginfo(f">> [SPARK-DETECT] Loading model 2: {model_path_2}")
         self.model_2 = yolov5.load(model_path_2)
+        self.model_2.conf = 0.03
         rospy.loginfo(f">> [SPARK-DETECT] Both models loaded "
                       f"(augment={self.augment}, dedupe={self.dedupe_px:.0f}px).")
 
@@ -174,7 +176,8 @@ class Detector:
             item_id = int(self.obj_id[box["name"]])
             if item_id not in REPORTED_IDS:
                 continue
-            if box["score"] < self.publish_conf:
+            min_conf = 0.03 if match_logic.is_cake(item_id) else self.publish_conf
+            if box["score"] < min_conf:
                 continue
             obj = Detection2D()
             obj.header = data.header

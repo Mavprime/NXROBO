@@ -41,6 +41,25 @@ class TestArmIKReachability(unittest.TestCase):
         self.assertTrue(arm_ik.pixel_reachable(240, 320, [-55.0, 0.0, 60.0], x_kb, y_kb))
         self.assertFalse(arm_ik.pixel_reachable(240, 320, [-55.0, 999.0], x_kb, y_kb))
 
+    def test_cake_tier2_reachability_and_approximation(self):
+        """Tier 2 cake grasp reaches over front row (x up to 350 mm, z=40 mm)."""
+        self.assertTrue(arm_ik.ik_reachable(350.0, 0.0, 40.0))
+        self.assertTrue(arm_ik.ik_reachable(340.0, -15.0, 40.0))
+        self.assertTrue(arm_ik.ik_reachable(344.0, 0.0, 85.0),
+                        "vertical lift off pedestal to z=85 must be reachable")
+        self.assertFalse(arm_ik.ik_reachable(344.0, 0.0, 130.0),
+                         "z=130 at extreme reach violates elbow joint limit (theta2 < 0)")
+        self.assertTrue(arm_ik.ik_reachable(280.0, 0.0, 120.0),
+                        "retracted clearance pose must be reachable")
+        self.assertTrue(match_logic.is_cake(2))
+        self.assertTrue(match_logic.is_cake(20))
+        self.assertFalse(match_logic.is_cake(1))
+
+        # Cake dedicated approximation with +30 mm offset
+        cx, cy = match_logic.pixel_to_cake_xy(None, 354, 99, cup_offset_x=30.0)
+        self.assertLessEqual(cx, 350.0)
+        self.assertGreaterEqual(cx, 330.0)
+
 
 class TestSingleSourceOfKinematics(unittest.TestCase):
     """arm_ik.py is a shim: runtask.py and the shim must share one implementation."""

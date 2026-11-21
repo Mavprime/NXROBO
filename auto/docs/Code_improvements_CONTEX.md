@@ -3,7 +3,7 @@
 **Date:** 2026-11-16  
 **Robot:** Spark-H (NXROBO) — Ubuntu 20.04 LTS (ROS Noetic)  
 **Robot IP:** `10.24.170.0` (User: `spark`, Password: `simple2026`)  
-**Workspace Path (Local):** `D:\ROS competition\spark_humble_ws\codes\`  
+**Workspace Path (Local):** `D:\NXROBO\auto\codes\`  
 **Target Path (Robot):** `/home/spark/codes/`  
 
 ---

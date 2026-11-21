@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 
 import math
+import hashlib
+import json
 import os
 import struct
 import threading
@@ -28,8 +30,9 @@ from vision_msgs.msg import Detection2DArray
 import match_logic
 from match_logic import (
     CAKE_ID, CONF_THRESHOLD, CLUSTER_DIST_PX, DEFAULT_MAPPING, MatchClock,
-    MAX_TIER, TOTAL_CUBES, ZONES_BCD, decode_classification_board,
-    expand_aliases, ik_reachable, norm_id, parse_task_command,
+    MAX_TIER, TOTAL_CUBES, ZONES_BCD, check_transform, decode_classification_board,
+    expand_aliases, ik_reachable, norm_id, pad_projection_error,
+    parse_task_command, pixel_to_cake_xy, project_arm,
 )
 
 # --------------------------------------------------------------------------
@@ -73,6 +76,11 @@ TRANSFORM_3D = np.array([
 # HIGHER than the measured surface, otherwise the pad is pressed into the
 # object/floor and the open-loop steppers skip steps.
 PAD_THICKNESS_MM = 8.0
+
+#: Smallest orange-pad blob accepted by the calibration self-check.  A blob
+#: clipped by the arm or the image border still has a centroid, but a biased
+#: one; one such point once dragged a calibration fit from 1.1 to 3.1 px.
+PAD_MIN_AREA = 400.0
 
 # Hard software floor.  Below this the linkage/pad presses on the floor and
 # the steppers lose position; never command the wrist lower than this.
@@ -156,16 +164,74 @@ class CamAction:
         self.transform3d = self._load_transform()
 
     def _load_transform(self):
-        '''Load a freshly calibrated 4x3 camera<-arm matrix if present.'''
+        '''Load, sanity-check and describe the camera<-arm matrix.
+
+        Sets ``self.calib_ok``.  When it is False the matrix cannot be trusted
+        at all, so AutoAction refuses to start the match instead of missing
+        every cube silently.  A matrix that is numerically fine but stale
+        (the camera was moved) cannot be detected here - that is what the
+        active pad check is for.
+        '''
         path = os.path.expanduser("~/transform_3d.dat")
+        source = path
+        matrix = None
         try:
-            t = np.load(path, allow_pickle=True)
-            if t.shape == (4, 3):
-                rospy.loginfo(f">> [DEPTH] Loaded 3D camera-arm transform from {path}")
-                return t
+            matrix = np.load(path, allow_pickle=True)
         except Exception:
-            pass
-        return TRANSFORM_3D
+            matrix = None
+        if matrix is None or getattr(matrix, "shape", None) != (4, 3):
+            source = "built-in TRANSFORM_3D"
+            matrix = TRANSFORM_3D
+            rospy.logwarn(">> [CALIB] %s missing or not 4x3: using %s. "
+                          "Run 'python3 -u ~/codes/calib3d.py'." % (path, source))
+
+        # Fingerprint of the file on disk: the metadata sidecar must describe
+        # THIS matrix, otherwise its check frame is meaningless.
+        self.calib_md5 = None
+        if source == path:
+            try:
+                with open(path, "rb") as handle:
+                    self.calib_md5 = hashlib.md5(handle.read()).hexdigest()
+            except Exception:
+                self.calib_md5 = None
+
+        ok, problems, stats = check_transform(matrix)
+        self.calib_problems = list(problems)
+        self.calib_ok = bool(ok)
+        if ok:
+            rospy.loginfo(">> [CALIB] matrix from %s: %.2f px/mm at the "
+                          "workspace, round-trip %.1f mm"
+                          % (source, stats.get("px_per_mm", 0.0),
+                             stats.get("roundtrip_mm", 0.0)))
+        else:
+            for problem in problems:
+                rospy.logerr(f">> [CALIB] {problem}")
+            rospy.logerr(">> [CALIB] camera->arm matrix is unusable; run "
+                         "'python3 -u ~/codes/calib3d.py'")
+
+        meta = self._read_calibration_meta()
+        self.calib_meta = meta
+        if meta:
+            rospy.loginfo(">> [CALIB] fitted %s from %s pose(s), leave-one-out "
+                          "max %.1f px / mean %.1f px"
+                          % (meta.get("created", "?"), meta.get("poses", "?"),
+                             float(meta.get("loo_max_px", 0.0)),
+                             float(meta.get("loo_mean_px", 0.0))))
+        elif source == path:
+            rospy.logwarn(">> [CALIB] no calibration metadata next to %s: "
+                          "age and residuals unknown. Re-run calib3d.py after "
+                          "moving the camera." % path)
+        return matrix
+
+    @staticmethod
+    def _read_calibration_meta():
+        '''Metadata written by calib3d.py next to the matrix, or None.'''
+        path = os.path.expanduser("~/transform_3d.meta.json")
+        try:
+            with open(path, "r", encoding="utf8") as handle:
+                return json.load(handle)
+        except Exception:
+            return None
 
     def _objects_cb(self, msg):
         '''Buffer one detection frame (possibly empty) for the voting window.'''
@@ -277,7 +343,7 @@ class CamAction:
             y = min(max(y, -210.0), 210.0)
         return x, y
 
-    def detector(self, num_samples=None, timeout=3.0):
+    def detector(self, num_samples=None, timeout=3.0, conf_threshold=None):
         '''
         Majority-voted, spatially clustered cube list.
 
@@ -317,8 +383,9 @@ class CamAction:
                           if stamp >= started]
 
         frames = frames[-wanted:]
+        thresh = CONF_THRESHOLD if conf_threshold is None else float(conf_threshold)
         cubes = match_logic.cluster_detections(
-            frames, conf_threshold=CONF_THRESHOLD,
+            frames, conf_threshold=thresh,
             cluster_dist_px=CLUSTER_DIST_PX)
         rospy.loginfo_throttle(
             1.0, f">> [VISION] {len(cubes)} cube(s) from {len(frames)} frame(s): {cubes}")
@@ -504,7 +571,7 @@ class ArmAction:
            - Confident vertical lift upwards (+100 mm)
         '''
         # 1. Primary cube detection
-        cube_list = self.cam.detector(timeout=3.0)
+        cube_list = self.cam.detector(num_samples=6, timeout=3.0, conf_threshold=0.04)
         rospy.loginfo(f">> [GRASP] Cube detection: {cube_list}")
 
         if not cube_list:
@@ -514,6 +581,9 @@ class ArmAction:
 
         target_cube = match_logic.select_grasp_candidate(cube_list)
         target_id = target_cube[0]
+        if match_logic.is_cake(target_id):
+            rospy.loginfo(f">> [GRASP] Target ID {target_id} is CAKE -> routing to grasp1 (Layer 2)!")
+            return self.grasp1()
         initial_target_id = target_id
         cu = target_cube[1][0]
         cv = target_cube[1][1]
@@ -615,7 +685,7 @@ class ArmAction:
         2. If out of reach: rotate, rescan after rotation for exact coordinates.
         3. Vacuum grasp with dwell time and vertical lift.
         '''
-        cube_list = self.cam.detector(timeout=3.0)
+        cube_list = self.cam.detector(num_samples=6, timeout=3.0, conf_threshold=0.04)
         rospy.loginfo(f">> [GRASP1] Layer 2 Cake detection: {cube_list}")
 
         if len(cube_list) == 0:
@@ -639,81 +709,56 @@ class ArmAction:
                 f"({CAKE_SORTING_STATION}) and the cake detector class.")
 
         # Geometry for Layer 2 Cake: sits on Layer 1 (top at -50 mm).
-        # Cake top surface is at z_touch ~ 50.0 mm; cube height ~ 100 mm -> center is at z_center = 0.0 mm
+        # Cake top surface is at z_touch ~ 40.0 mm (firm suction contact with 20 cm tier)
         z_center = 0.0
-        z_touch = 50.0
-        z_safe = 100.0   # 150 mm above ground cube tops (-50 mm) - clears any Layer 1 obstacles!
-        z_lift = 150.0
+        z_touch = 40.0
+        z_safe = 75.0    # Clears any Layer 1 front-row obstacles safely!
+        z_lift = 85.0    # Vertical separation lift (+45 mm off pedestal, theta2=9.5 deg)
+        z_retract = 120.0
+        x_retract = 270.0
 
-        xy = match_logic.pixel_to_xy_at_z(self.cam.transform3d, u, v, z_center)
-        if xy is None:
-            rospy.logerr(">> [GRASP1] Degenerate projective mapping.")
+        # Dedicated approximation for Cake on Tier 2 (thefile2.txt +3cm forward):
+        cake_xy = match_logic.pixel_to_cake_xy(self.cam.transform3d, u, v, cup_offset_x=30.0)
+        if cake_xy is None:
+            rospy.logerr(">> [GRASP1] Degenerate cake approximation.")
             self.grasp_status_pub.publish(String("1"))
             return 0
-        x = xy[0] + 20.0  # +20 mm cup center correction
-        y = xy[1]
+        x, y = cake_xy
 
-        # Comfortable sweet-spot envelope
-        TARGET_X = 245.0
+        # CRITICAL: For Cake positioned behind front-row obstacles,
+        # base motion is strictly inhibited to avoid colliding with front-row cubes.
+        # The manipulator reaches over the obstacle row from the stationary position.
+        in_reach = True
         dist_to_cake = math.hypot(x, y)
-        in_reach = (160.0 <= x <= 265.0) and (abs(y) <= 85.0) and (dist_to_cake <= 270.0)
-        rospy.loginfo(f">> [GRASP1] Target ID {target_id}: u={u:.0f}, v={v:.0f} -> x={x:.1f}, y={y:.1f}, dist={dist_to_cake:.1f} | in_reach={in_reach}")
+        rospy.loginfo(f">> [GRASP1] Target ID {target_id}: u={u:.0f}, v={v:.0f} -> x={x:.1f}, y={y:.1f}, dist={dist_to_cake:.1f} | obstacle-guard in_reach=True")
 
-        approach_step = 0
-        while approach_step < 3 and not in_reach:
-            approach_step += 1
-            rospy.loginfo(f">> [GRASP1] Cake outside sweet spot (x={x:.1f}, y={y:.1f}, dist={dist_to_cake:.1f}). Approach step #{approach_step}...")
-
-            angle_rad = math.atan2(y, x)
-            if abs(angle_rad) > math.radians(2.0):
-                rospy.loginfo(f">> [GRASP1] Turning base towards cake: {math.degrees(angle_rad):.1f} deg...")
-                self.turn_base(angle_rad)
-                rospy.sleep(0.3)
-
-            drive_m = (dist_to_cake - TARGET_X) / 1000.0
-            if abs(drive_m) >= 0.02:
-                step_m = max(-0.25, min(0.25, drive_m))
-                rospy.loginfo(f">> [GRASP1] Driving {step_m*100:.1f} cm to position cake at 24.5 cm...")
-                self.drive_base(step_m)
-                rospy.sleep(0.4)
-
-            # CRITICAL: Re-scan cake position after approach!
-            rospy.loginfo(f">> [GRASP1] Re-scanning cake position after approach step #{approach_step}...")
-            rescan_list = self.cam.detector(timeout=3.0)
-            if rescan_list:
-                target_cube = match_logic.select_grasp_candidate(
-                    rescan_list, preferred_id=initial_target_id, y_ref=250.0)
-                target_id = target_cube[0]
-                u = target_cube[1][0]
-                v = target_cube[1][1]
-                xy = match_logic.pixel_to_xy_at_z(self.cam.transform3d, u, v, z_center)
-                if xy is not None:
-                    x = xy[0] + 20.0
-                    y = xy[1]
-                    dist_to_cake = math.hypot(x, y)
-                    in_reach = (160.0 <= x <= 265.0) and (abs(y) <= 85.0) and (dist_to_cake <= 270.0)
-                    rospy.loginfo(f">> [GRASP1] Re-scanned cake target: u={u:.0f}, v={v:.0f} -> x={x:.1f}, y={y:.1f}, dist={dist_to_cake:.1f} | in_reach={in_reach}")
-            else:
-                break
-
-        x = max(120.0, min(320.0, x))
+        # Safe reach limits expanded specifically for Cake up to 350.0 mm
+        x = max(120.0, min(350.0, x))
         y = max(-190.0, min(190.0, y))
         rospy.loginfo(f">> [GRASP1] Executing grasp for Cake ID {target_id}: x={x:.1f}, y={y:.1f}, z_touch={z_touch:.1f}, z_lift={z_lift:.1f}")
 
         self.interface.set_status(True)
         rospy.sleep(0.20)
 
-        # Move above cake at safe height (z_safe=100 mm clears any ground cube in front)
+        # Move above cake at safe height (z_safe=75 mm clears any ground cube in front)
+        self.interface.set_pose(130.0, 0.0, z_safe, delay=0.5)
         self.interface.set_pose(x, y, z_safe, delay=0.9)
 
+        # Activate vacuum suction before descent so it draws immediately upon contact
         self.interface.set_pump(True)
-        rospy.sleep(0.10)
+        rospy.sleep(0.30)
         self.interface.set_pose(x, y, z_touch, delay=0.9)
-        rospy.sleep(0.40)
+        rospy.sleep(0.60)
 
         print("Layer 2 Cake lifted successfully")
+        # Stage 1: Vertical separation off pedestal
         self.interface.set_pose(x, y, z_lift, delay=0.8)
-        rospy.loginfo(f">> [GRASP1] Layer 2 Cake ID {target_id} lifted successfully to height z={z_lift}")
+        rospy.sleep(0.50)
+        # Stage 2: Pull cake inward to secure position and reduce torque
+        self.interface.set_pose(x_retract, y, z_retract, delay=0.8)
+        rospy.sleep(0.50)
+
+        rospy.loginfo(f">> [GRASP1] Layer 2 Cake ID {target_id} lifted and secured successfully to height z={z_retract}")
 
         self.grasp_status_pub.publish(String("0"))
         return target_id
@@ -825,6 +870,136 @@ class ArmAction:
 
     def arm_grasp_laser(self, block=False):
         self.interface.set_pose(160, 0, 20, delay=0.35 if block else 0.20)
+
+    #: Pose used by the active calibration check: 270 mm in front, level,
+    #: 80 mm above the top of a floor cube, so a cube standing anywhere in the
+    #: workspace cannot be hit while the arm travels there.  Kept inside the
+    #: z range covered by the fit (>= -60 mm) so the check is not extrapolated.
+    CALIB_CHECK_POSE = (270.0, 0.0, 30.0)
+
+    def measure_pad(self, pose=None):
+        '''
+        Move to ``pose`` and return the median orange-pad pixel, or None.
+
+        A partially occluded pad still produces a centroid, just a biased one,
+        so only full-size blobs count and a few frames are medianed instead of
+        trusting the first reading.
+        '''
+        pose = self.CALIB_CHECK_POSE if pose is None else pose
+        try:
+            from cv_bridge import CvBridge
+            from pad_detect import grab, pad_pixel
+        except Exception as exc:
+            rospy.logerr(">> [CALIB] cannot load the pad detector: %s" % exc)
+            return None
+
+        bridge = CvBridge()
+        # NOTE: no M17 here.  Re-attaching the motors before every move made
+        # the uArm miss steps (~15 mm low), which looked exactly like a moved
+        # camera.  ArmAction.__init__ attaches them once; leave them attached.
+        self.interface.set_pose(float(pose[0]), float(pose[1]), float(pose[2]),
+                                delay=1.4)
+        rospy.sleep(0.3)
+        picks = []
+        for _ in range(5):
+            try:
+                found = pad_pixel(grab(bridge))
+            except Exception:
+                found = None
+            if found and found[2] >= PAD_MIN_AREA:
+                picks.append((found[0], found[1]))
+            if len(picks) >= 3:
+                break
+            rospy.sleep(0.1)
+        if not picks:
+            return None
+        return (float(np.median([pick[0] for pick in picks])),
+                float(np.median([pick[1] for pick in picks])))
+
+    def verify_calibration(self, pose=None, tol_px=6.0):
+        '''
+        Check that the camera and the arm still agree with the calibration.
+
+        Moves to a known pose, finds the pad and compares the measured pixel
+        with the pixel recorded during calibration (metadata sidecar).  That
+        reference is a real measurement, not a model prediction, so the check
+        is not confused by the ~2-3 px residual of the fit itself; a camera
+        that was moved shows up as a large jump.
+
+        The uArm steppers occasionally miss steps on one fast move, which
+        lands the pad ~15 mm low, so a failed measurement is retried once.  A
+        camera that really moved fails both attempts.
+
+        @return: (ok, detail).  A pad that is not visible returns ok=True with
+                 an explanatory detail: a lighting problem must not block the
+                 match, it only means the check could not run.
+        '''
+        pose = self.CALIB_CHECK_POSE if pose is None else pose
+        if self.cam is None:
+            return True, "no camera, check skipped"
+
+        best = None
+        for attempt in (1, 2):
+            uv = self.measure_pad(pose)
+            if uv is None:
+                if attempt == 1:
+                    rospy.logwarn(">> [CALIB] pad not visible at the check "
+                                  "pose, retrying once")
+                    self.arm_home(block=True)
+                    rospy.sleep(1.2)
+                    continue
+                return True, ("pose=(%.0f, %.0f, %.0f), but the pad is not "
+                              "visible/full-size - check skipped" % pose)
+            error, detail = self._pad_error(pose, uv)
+            if error is None:
+                return True, detail
+            if best is None or error < best[0]:
+                best = (error, detail)
+            if error <= tol_px:
+                break
+            if attempt == 1:
+                rospy.logwarn(">> [CALIB] pad check %.1f px off, retrying once"
+                              % error)
+                self.arm_home(block=True)
+                rospy.sleep(1.2)
+        return (best[0] <= tol_px), best[1]
+
+    def _pad_error(self, pose, uv):
+        '''Pixel distance between ``uv`` and the calibration reference.'''
+        detail = "pose=(%.0f, %.0f, %.0f), pad at (%.1f, %.1f)" % (
+            pose[0], pose[1], pose[2], uv[0], uv[1])
+        reference = self._calibration_reference(pose)
+        if reference is not None:
+            error = math.hypot(uv[0] - reference[0], uv[1] - reference[1])
+            detail += ", calibration frame (%.1f, %.1f)" % reference
+            source = "pad moved"
+        else:
+            error = pad_projection_error(self.cam.transform3d, pose, uv)
+            if error is None:
+                return None, detail + " - no metadata and pose not projectable"
+            source = "projection differs"
+        detail += ": %s by %.1f px" % (source, error)
+        return error, detail
+
+    def _calibration_reference(self, pose):
+        '''Pad pixel recorded by calib3d.py for ``pose``, if it matches.'''
+        meta = getattr(self.cam, "calib_meta", None)
+        if not meta:
+            return None
+        stored = meta.get("file_md5")
+        current = getattr(self.cam, "calib_md5", None)
+        if stored and current and stored != current:
+            rospy.logwarn(">> [CALIB] metadata belongs to a different matrix "
+                          "(stale sidecar); ignoring the stored check frame")
+            return None
+        check = meta.get("check") or {}
+        saved_pose = check.get("pose")
+        uv = check.get("uv")
+        if not saved_pose or not uv or len(saved_pose) != 3 or len(uv) != 2:
+            return None
+        if max(abs(float(a) - float(b)) for a, b in zip(saved_pose, pose)) > 1.0:
+            return None
+        return (float(uv[0]), float(uv[1]))
 
 class RobotMoveAction:
     def __init__(self):
@@ -992,6 +1167,45 @@ class AutoAction:
             self.init_errors.append(f"robot: {e}")
             rospy.logerr(f">> [INIT] RobotMoveAction failed: {e}")
 
+        # A matrix that cannot even be read/parsed is a hard stop: every grasp
+        # would miss by tens of millimetres with no error anywhere.
+        if self.cam is not None and not getattr(self.cam, "calib_ok", True):
+            self.init_errors.append("calibration: camera->arm matrix failed "
+                                    "the sanity check (run calib3d.py)")
+
+        # Active check: runs ONLY ONCE after the arm driver starts.
+        # Once verified, /tmp/arm_calib_done persists so subsequent launches
+        # do not move the manipulator unnecessarily before every run.
+        calib_flag = "/tmp/arm_calib_done"
+        if (self.arm is not None and not self.init_errors
+                and os.environ.get("SPARK_CALIB_CHECK", "1") != "0"
+                and not os.path.exists(calib_flag)):
+            try:
+                calib_ok, calib_detail = self.arm.verify_calibration()
+            except Exception as e:
+                calib_ok, calib_detail = True, "check crashed: %s" % e
+            if calib_ok:
+                rospy.loginfo(f">> [CALIB] active pad check: {calib_detail}")
+                try:
+                    with open(calib_flag, "w") as f:
+                        f.write(time.strftime("%Y-%m-%dT%H:%M:%S\n"))
+                except Exception:
+                    pass
+            else:
+                rospy.logerr(f">> [CALIB] active pad check FAILED: {calib_detail}")
+                self.init_errors.append(
+                    f"calibration: pad check failed ({calib_detail})")
+            try:
+                self.arm.arm_home(block=True)
+            except Exception as e:
+                rospy.logwarn(f">> [CALIB] could not home the arm: {e}")
+        elif os.path.exists(calib_flag):
+            rospy.loginfo(">> [CALIB] Manipulator already calibrated once after driver startup, skipping pad check.")
+        elif self.arm is not None and not self.init_errors:
+            rospy.logwarn(">> [CALIB] active pad check disabled by "
+                          "SPARK_CALIB_CHECK=0: a moved camera will not be "
+                          "detected at startup")
+
         #: True only when the whole chain is up; the FSM refuses to start otherwise.
         self.ready = not self.init_errors
 
@@ -1137,7 +1351,7 @@ class AutoAction:
         self.robot.step_go(0.4)
         if self._abort_requested():
             return
-        self.arm.arm_position_reset()  # 重置机械臂坐标系
+        # Motors stay continuously attached from driver bringup (M17); avoid motor reset slip
 
         # ===== classification board (SI-14: fall back instead of aborting) =====
         if self._navigate("Classification_area"):

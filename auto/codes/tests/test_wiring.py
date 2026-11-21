@@ -27,6 +27,10 @@ PRODUCTION_FUNCTIONS = (
     "norm_id",
     "ik_reachable",
     "pixel_to_arm",
+    "pixel_to_xy_at_z",
+    "project_arm",
+    "pad_projection_error",
+    "check_transform",
     "cluster_detections",
     "decode_classification_board",
     "choose_drop_zone",
@@ -98,6 +102,11 @@ class TestRuntaskUsesMatchLogic(unittest.TestCase):
     def test_uses_the_zone_and_tier_planners(self):
         self.assertIn("choose_drop_zone(", self.source)
         self.assertIn("plan_drop(", self.source)
+
+    def test_uses_the_calibration_guard(self):
+        """A stale hand-eye matrix must be caught at startup, not in the log."""
+        self.assertIn("check_transform(", self.source)
+        self.assertIn("verify_calibration(", self.source)
 
     def test_no_private_copy_of_ik_or_normalizer(self):
         defined = defined_functions(RUNTASK)

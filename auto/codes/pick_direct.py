@@ -37,6 +37,7 @@ import rospy
 from swiftpro.msg import SwiftproState
 
 import match_logic
+from match_logic import pixel_to_xy_at_z
 from runtask import CamAction, ArmAction, CAM_FX, CAM_FY, CAM_CX, CAM_CY
 try:                       # older runtask.py variants have no voting window
     from runtask import GRASP_FRAMES
@@ -46,27 +47,6 @@ except ImportError:
 STATE_TOPIC = "/SwiftproState_topic"
 X_MIN, X_MAX = 120.0, 320.0
 Y_LIMIT = 190.0
-
-
-def pixel_to_xy_at_z(M, u, v, z,
-                     fx=CAM_FX, fy=CAM_FY, cx=CAM_CX, cy=CAM_CY):
-    """Closed-form inverse of the projective map at a fixed height."""
-    up = (u - cx) / fx
-    vp = (v - cy) / fy
-    r0, r1, r2 = M[:, 0], M[:, 1], M[:, 2]
-    C0 = r0[2] * z + r0[3]
-    C1 = r1[2] * z + r1[3]
-    C2 = r2[2] * z + r2[3]
-    a11 = r0[0] - up * r2[0]
-    a12 = r0[1] - up * r2[1]
-    a21 = r1[0] - vp * r2[0]
-    a22 = r1[1] - vp * r2[1]
-    b1 = up * C2 - C0
-    b2 = vp * C2 - C1
-    det = a11 * a22 - a12 * a21
-    if abs(det) < 1e-12:
-        return None
-    return ((b1 * a22 - a12 * b2) / det, (a11 * b2 - b1 * a21) / det)
 
 
 def read_actual(timeout=3.0):
@@ -94,8 +74,8 @@ def move_checked(arm, x, y, z, settle=0.9, tol=6.0):
     return ax, ay, az, err <= tol
 
 
-def detect(cam):
-    cubes = cam.detector(num_samples=GRASP_FRAMES, timeout=6.0)
+def detect(cam, conf_threshold=0.04, num_samples=6):
+    cubes = cam.detector(num_samples=num_samples, timeout=6.0, conf_threshold=conf_threshold)
     if not cubes:
         return None
     best = match_logic.select_grasp_candidate(cubes)
@@ -173,25 +153,57 @@ def main():
         cube_id, cu, cv_ = found
         entry["cube"] = cube_id
         entry["pixel"] = [cu, cv_]
-        print("[CUBE] class=%d pixel=(%.0f, %.0f)" % (cube_id, cu, cv_))
 
-        xy = pixel_to_xy_at_z(cam.transform3d, cu, cv_, z_center)
-        if xy is None:
-            print("[FAIL] inverse mapping is degenerate")
-            return 4
-        x = xy[0] + args.fix_dx
-        y = xy[1] + args.fix_dy
-        entry["target"] = [x, y]
-        print("[TARGET] cube centre maps to x=%.1f y=%.1f" % (x, y))
+        is_cake = match_logic.is_cake(cube_id)
+        if is_cake:
+            z_center = 0.0
+            z_touch = 40.0    # Touch surface for 20 cm tier (Layer 2)
+            z_above = 75.0    # Safe clearance over Tier 1 obstacles (-50 mm)
+            z_lift = 85.0     # Lift cake +45mm off pedestal (safe joint angles theta2=9.5 deg)
+            z_retract = 120.0 # Elevated retract clearance once pulled back
+            x_retract = 270.0 # Retracted X pose reducing moment arm
+            max_reach_x = 350.0   # Expanded reach limit specifically for Cake
+            max_dist = 355.0
+            cake_xy = match_logic.pixel_to_cake_xy(cam.transform3d, cu, cv_, cup_offset_x=30.0)
+            if cake_xy is None:
+                print("[FAIL] cake approximation is degenerate")
+                return 4
+            x = cake_xy[0] + args.fix_dx
+            y = cake_xy[1] + args.fix_dy
+            print(f"[TARGET] DEDICATED CAKE APPROXIMATION (thefile2.txt +3cm): maps to x={x:.1f}, y={y:.1f}, z_touch={z_touch:.1f}")
+        else:
+            z_center = args.z_touch - args.cube_height / 2.0
+            z_touch = args.z_touch
+            z_above = args.z_above
+            z_lift = 60.0
+            max_reach_x = 265.0
+            max_dist = 270.0
+            xy = pixel_to_xy_at_z(cam.transform3d, cu, cv_, z_center)
+            if xy is None:
+                print("[FAIL] inverse mapping is degenerate")
+                return 4
+            x = xy[0] + 20.0 + args.fix_dx
+            y = xy[1] + args.fix_dy
+            print("[TARGET] cube centre maps to x=%.1f y=%.1f" % (x, y))
+
+        print("[CUBE] class=%d (cake=%s) pixel=(%.0f, %.0f)" % (cube_id, is_cake, cu, cv_))
 
         # --- Check reachability, approach if needed, then re-scan and grasp ---
         TARGET_X = 245.0
         approach_step = 0
 
+        # CRITICAL: For Cake positioned behind front-row obstacles,
+        # base motion is strictly inhibited to avoid colliding with front-row cubes.
+        # The manipulator reaches over the obstacle row from the stationary position.
         while approach_step < args.max_approach:
+            if is_cake:
+                in_reach = True
+                print("[OBSTACLE-GUARD] Cake grasp: base motion strictly inhibited to preserve front-row cubes.")
+                break
+
             dist_to_cube = math.hypot(x, y)
             # Comfortable sweet-spot envelope: arm is not strained, lands dead center on cube
-            in_reach = (160.0 <= x <= 265.0) and (abs(y) <= 85.0) and (dist_to_cube <= 270.0)
+            in_reach = (160.0 <= x <= max_reach_x) and (abs(y) <= 85.0) and (dist_to_cube <= max_dist)
 
             if in_reach:
                 break
@@ -236,60 +248,81 @@ def main():
             cube_id, cu, cv_ = found
             entry["cube"] = cube_id
             entry["pixel"] = [cu, cv_]
-            xy = pixel_to_xy_at_z(cam.transform3d, cu, cv_, z_center)
-            if xy is None:
-                print("[FAIL] inverse mapping degenerate after approach")
-                return 4
-            x = xy[0] + args.fix_dx
-            y = xy[1] + args.fix_dy
+            if is_cake:
+                cake_xy = match_logic.pixel_to_cake_xy(cam.transform3d, cu, cv_)
+                if cake_xy is None:
+                    print("[FAIL] cake approximation degenerate after approach")
+                    return 4
+                x = cake_xy[0] + args.fix_dx
+                y = cake_xy[1] + args.fix_dy
+            else:
+                xy = pixel_to_xy_at_z(cam.transform3d, cu, cv_, z_center)
+                if xy is None:
+                    print("[FAIL] inverse mapping degenerate after approach")
+                    return 4
+                x = xy[0] + 20.0 + args.fix_dx
+                y = xy[1] + args.fix_dy
             entry["target"] = [x, y]
             print("[RE-SCAN] cube now at px=(%.0f, %.0f) -> x=%.1f, y=%.1f" % (cu, cv_, x, y))
 
         if args.dry_run:
             print("[DRY] in_reach=True, would approach above at z=%.0f and descend to z=%.0f"
-                  % (args.z_above, args.z_touch))
+                  % (z_above, z_touch))
             entry["result"] = "DRY"
             return 0
 
+        # Clamp target x within physical arm limit
+        x_max = 350.0 if is_cake else 320.0
+        x = max(120.0, min(x_max, x))
+
         # 4. Standard grasp sequence: position above, verify actual, descend, pump, lift
-        result = move_checked(arm, x, y, args.z_above, tol=args.reach_tol)
+        # Rise above front obstacles first before moving forward in (X, Y)
+        print("[CLEARANCE] moving arm up to z=%.0f clearance pose..." % z_above)
+        arm.interface.set_pose(130.0, 0.0, z_above, delay=0.5)
+
+        result = move_checked(arm, x, y, z_above, tol=args.reach_tol)
         if result is None or not result[3]:
-            # If slightly short on reach, small correction
-            if result is not None:
+            # If slightly short on reach, only drive base if not cake (never hit front obstacles)
+            if result is not None and not is_cake:
                 ax, ay, az, _ = result
                 shortfall = x - ax
                 if abs(shortfall) > 6.0:
                     arm.drive_base(max(-0.06, min(0.06, shortfall / 1000.0)))
                     rospy.sleep(0.4)
-                    result = move_checked(arm, x, y, args.z_above, tol=args.reach_tol)
+                    result = move_checked(arm, x, y, z_above, tol=args.reach_tol)
             if result is None or not result[3]:
                 print("[ABORT] arm cannot reach pose above cube")
                 entry["result"] = "UNREACHABLE"
                 return 5
 
-        print("[DESCEND] straight down to z=%.0f (single smooth motion)" % args.z_touch)
-        arm.interface.set_pose(x, y, args.z_touch, delay=0.8)
+        # Turn pump ON while above the cube so suction is active upon contact
+        print("[PUMP] turning on vacuum pump before descent...")
+        arm.interface.set_pump(True)
+        rospy.sleep(0.3)
+
+        print("[DESCEND] straight down to z=%.0f (compressing suction cup)" % z_touch)
+        arm.interface.set_pose(x, y, z_touch, delay=0.8)
 
         actual = read_actual()
         if actual is not None:
             ax, ay, az = actual
             print("[DESCEND] actual at touch: (%.1f, %.1f, %.1f)" % (ax, ay, az))
-            if max(abs(ax - x), abs(ay - y)) > args.reach_tol:
-                print("[ABORT] the wrist did not reach the touch pose - "
-                      "retracting without pumping")
-                entry["result"] = "TOUCH_UNREACHED"
-                return 6
 
-        print("[PUMP] on")
-        arm.interface.set_pump(True)
-        rospy.sleep(0.5)
+        # Dwell at contact to build solid vacuum
+        rospy.sleep(0.6)
 
-        print("[LIFT] straight up to z=60 (single smooth motion)")
-        arm.interface.set_pose(x, y, 60.0, delay=0.8)
+        if is_cake:
+            print("[LIFT] stage 1: vertical separation to z=%.0f (lifting cake off pedestal)..." % z_lift)
+            arm.interface.set_pose(x, y, z_lift, delay=0.8)
+            rospy.sleep(0.6)
 
-        if args.hold:
-            print("[HOLD] pump on for %.1f s" % args.hold)
-            rospy.sleep(args.hold)
+            print("[RETRACT-INWARD] stage 2: pulling cake inward to x=%.0f, z=%.0f..." % (x_retract, z_retract))
+            arm.interface.set_pose(x_retract, y, z_retract, delay=0.8)
+            rospy.sleep(1.0)
+        else:
+            print("[LIFT] straight up to z=%.0f (confident vertical lift)" % z_lift)
+            arm.interface.set_pose(x, y, z_lift, delay=0.8)
+            rospy.sleep(1.2)
 
         still, where = cube_still_there(cam, cube_id, cu, cv_)
         entry["cube_still_on_table"] = bool(still)
@@ -297,17 +330,23 @@ def main():
             print("[VERIFY] FAILED: cube still on the table at %s" % (where,))
             entry["result"] = "MISS"
         else:
-            print("[VERIFY] cube left the table - picked up")
+            print("[VERIFY] SUCCESS: cube lifted into the air!")
             entry["result"] = "OK"
 
-        if args.place:
-            print("[PLACE] lowering the cube back and releasing (single smooth motion)")
-            arm.interface.set_pose(x, y, args.z_touch, delay=0.8)
-            rospy.sleep(0.3)
-            arm.interface.set_pump(False)
-            rospy.sleep(0.5)
-            arm.interface.set_pose(x, y, args.z_above, delay=0.8)
-            print("[PLACE] released, retracted")
+        # Safely lower the cube back down and release
+        print("[PLACE] returning to drop position...")
+        if is_cake:
+            arm.interface.set_pose(x, y, z_lift, delay=0.8)
+            rospy.sleep(0.4)
+        print("[PLACE] safely lowering cube back to z=%.0f..." % z_touch)
+        arm.interface.set_pose(x, y, z_touch, delay=0.8)
+        rospy.sleep(0.4)
+        print("[PLACE] turning off vacuum pump, releasing cube...")
+        arm.interface.set_pump(False)
+        rospy.sleep(0.6)
+        print("[RETRACT] rising back to clearance z=%.0f..." % z_above)
+        arm.interface.set_pose(x, y, z_above, delay=0.8)
+        rospy.sleep(0.4)
     finally:
         try:
             arm.interface.set_pump(False)

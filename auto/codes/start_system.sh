@@ -77,6 +77,7 @@ fi
 # 2. uArm manipulator
 if ! node_up /swiftpro_write_node; then
     echo "[2/8] Starting uArm manipulator driver..."
+    rm -f /tmp/arm_calib_done
     pkill -f "pro_control_nomoveit" 2>/dev/null
     sleep 1
     setsid nohup roslaunch swiftpro pro_control_nomoveit.launch \
@@ -125,7 +126,7 @@ if [ "${FORCE_DETECT:-0}" = "1" ] || ! node_up /detector_node; then
     echo "[5/8] Starting YOLO object detector (detect_ros.py)..."
     pkill -f "auto_match_25/auto_match/nodes/detect_ros\.py" 2>/dev/null
     sleep 1
-    setsid nohup python3 -u "$DETECT_NODE" > ~/logs/detect.log 2>&1 < /dev/null &
+    setsid nohup python3 -u "$DETECT_NODE" _augment:=true _conf:=0.25 > ~/logs/detect.log 2>&1 < /dev/null &
     # YOLO import + two model loads can take tens of seconds on the Spark CPU.
     # Wait until /objects actually produces a message (even an empty one).
     for i in $(seq 1 90); do

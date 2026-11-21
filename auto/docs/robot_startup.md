@@ -11,7 +11,7 @@
 Больше не нужно вбивать длинные команды и помнить IP-адрес:
 
 ### Вариант А (Самый простой — Двойной клик на Windows):
-Просто дважды кликни мышкой по файлу **`START_ROBOT.bat`** в папке `D:\ROS competition`!
+Просто дважды кликни мышкой по файлу **`START_ROBOT.bat`** в папке `auto\launchers\` (или запусти `connect.ps1`)!
 - Он покажет текущий сохраненный IP (`10.24.170.0`).
 - Нажми **Enter** (или введи новый IP, если робот получил другой адрес от Wi-Fi).
 - Скрипт мгновенно откроет красивый терминал с пультом управления!
@@ -30,9 +30,9 @@
 .\upload.ps1
 ```
 ```powershell
-powershell -ExecutionPolicy Bypass -File "D:\ROS competition\upload.ps1"
+powershell -ExecutionPolicy Bypass -File "auto\launchers\upload.ps1"
 ```
-*(Скрипт автоматически скопирует обновленный `runtask.py`, `dashboard.sh`, `start_system.sh`, `keypatched2v.py` и `arm_ik.py` на робота).*
+*(Скрипт автоматически скопирует обновленный `runtask.py`, `match_logic.py`, `dashboard.sh`, `start_system.sh`, `keypatched2v.py` и `arm_ik.py` на робота).*
 
 ---
 
@@ -64,11 +64,11 @@ powershell -ExecutionPolicy Bypass -File "D:\ROS competition\upload.ps1"
 Если на ПК отредактированы файлы, они отправляются одной командой в PowerShell:
 
 ```powershell
-# Обновить файл логики runtask:
-scp "D:\ROS competition\spark_humble_ws\codes\runtask.py" spark@10.24.170.0:/home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/runtask.py
+# Обновить файлы логики и детектора:
+scp "D:\NXROBO\auto\codes\runtask.py" "D:\NXROBO\auto\codes\detect_ros.py" "D:\NXROBO\auto\codes\match_logic.py" spark@10.24.170.0:/home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/
 
-# Обновить скрипты управления:
-scp "D:\ROS competition\spark_humble_ws\codes\start_system.sh" "D:\ROS competition\spark_humble_ws\codes\stop_system.sh" "D:\ROS competition\spark_humble_ws\codes\dashboard.sh" spark@10.24.170.0:/home/spark/codes/
+# Обновить скрипты управления в ~/codes:
+scp "D:\NXROBO\auto\codes\start_system.sh" "D:\NXROBO\auto\codes\stop_system.sh" "D:\NXROBO\auto\codes\dashboard.sh" "D:\NXROBO\auto\codes\pick_direct.py" "D:\NXROBO\auto\codes\calib3d.py" spark@10.24.170.0:/home/spark/codes/
 ```
 
 ---
