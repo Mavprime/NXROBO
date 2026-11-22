@@ -1,0 +1,29 @@
+[INFO] [1795349002.994376]: >> [VISION] items_config.yaml loaded, item ids: [3, 1, 2, 4]
+[INFO] [1795349003.002493]: >> [CALIB] matrix from /home/spark/transform_3d.dat: 1.05 px/mm at the workspace, round-trip 0.0 mm
+[INFO] [1795349003.004496]: >> [CALIB] fitted 2026-11-22T15:38:34 from 11 pose(s), leave-one-out max 0.7 px / mean 0.5 px
+[INFO] [1795349003.212519]: Setting arm motor status: True
+[INFO] [1795349003.514576]: Setting arm motor status: True
+[INFO] [1795349008.227382]: >> [VISION] 6 cube(s) from 4 frame(s): [[3, [492, 40, 0]], [3, [486, 107, 0]], [4, [347, 48, 0]], [2, [220, 108, 0]], [4, [78, 426, 0]], [4, [345, 107, 0]]]
+[SCAN_init] Detections (samples=5, conf>=0.04, cake_conf>=0.90, cake_site_conf>=0.60): [[3, [492, 40, 0]], [3, [486, 107, 0]], [4, [347, 48, 0]], [2, [220, 108, 0]], [4, [78, 426, 0]], [4, [345, 107, 0]]]
+[SCAN_init] 6 target(s) beyond the calibrated near field (out of arm reach): [(3, 492.0, 40.0), (3, 486.0, 107.0), (4, 347.0, 48.0), (2, 220.0, 108.0), (4, 78.0, 426.0), (4, 345.0, 107.0)] -> base approach required
+[DECISION] (Attempt 1/4) 5) Target beyond the near field (OUT OF ARM REACH) -> base approach step, then re-scan
+[TARGET] mode=cake class=2 xy=(433.8, 94.9) far=True in_reach=False dist=444.1 z_est=None
+[APPROACH] Aligning heading: 12.3 deg
+[INFO] [1795349008.229354]: >> [VISUAL-SERVO] Fast base turn: 12.3 deg, duration 0.29s, vel=0.75 rad/s
+[APPROACH] Single drive: +13.9 cm (target dist: 444 mm, desired: 305 mm, far-field estimate)
+[INFO] [1795349009.060474]: >> [VISUAL-SERVO] Base distance correction: 13.9 cm, duration 0.77s, vel=0.18 m/s
+[APPROACH] Base motion complete. Settling the chassis for 0.85 s ...
+[RETRY] Base stopped; re-scanning and re-checking the reach ...
+[INFO] [1795349014.861928]: >> [VISION] 10 cube(s) from 4 frame(s): [[1, [352, 40, 0]], [3, [612, 213, 0]], [3, [493, 61, 0]], [1, [616, 82, 0]], [2, [452, 247, 0]], [4, [468, 189, 0]], [4, [315, 220, 0]], [4, [319, 155, 0]], [4, [88, 426, 0]], [3, [597, 280, 0]]]
+[SCAN_approach_1] Detections (samples=5, conf>=0.04, cake_conf>=0.90, cake_site_conf>=0.60): [[1, [352, 40, 0]], [3, [612, 213, 0]], [3, [493, 61, 0]], [1, [616, 82, 0]], [2, [452, 247, 0]], [4, [468, 189, 0]], [4, [315, 220, 0]], [4, [319, 155, 0]], [4, [88, 426, 0]], [3, [597, 280, 0]]]
+[SCAN_approach_1] 5 target(s) beyond the calibrated near field (out of arm reach): [(1, 352.0, 40.0), (3, 612.0, 213.0), (3, 493.0, 61.0), (1, 616.0, 82.0), (3, 597.0, 280.0)] -> base approach required
+[TARGET] Cake depth reading hit floor/background (z=-154.7) -> using cake affine
+[DECISION] (Attempt 2/4) 1) Cake IN REACH -> pick immediately without base motion
+[TARGET] mode=cake class=2 xy=(322.2, -66.4) far=False in_reach=True dist=329.0 z_est=None
+APPROACH_RESULT: {'mode': 'cake', 'is_cake': True, 'class': 2, 'pixel': [452.0, 247.0], 'xy': [322.2, -66.4], 'z_est': None, 'far': False}
+PIXEL_IN_NEAR_FIELD: True
+BASE_TRAVELLED: +13.9 cm
+RESTORING START POSITION: -13.9 cm
+[INFO] [1795349014.930437]: >> [VISUAL-SERVO] Base distance correction: -13.9 cm, duration 0.77s, vel=-0.18 m/s
+VERIFY_DONE
+EXIT: 0

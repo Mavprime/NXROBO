@@ -1,0 +1,7 @@
+===== DEFAULT rospy signal handling =====
+mode=default raised=None elapsed=2.00 is_shutdown=True pub_closed=True
+publish_after_signal=OK (no exception)
+===== disable_signals + custom handler =====
+mode=custom raised=KeyboardInterrupt: signal 2 elapsed=0.40 is_shutdown=False pub_closed=False
+publish_after_signal=OK (no exception)
+===== DONE =====

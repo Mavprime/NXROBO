@@ -1,0 +1,102 @@
+=== grasp_test_run.log ===
+[0;36m[1m
+==========================================================
+      SPARK ROBOT - CUBE GRASP PREPARATION & TEST       
+==========================================================
+[0m
+[1/4] Checking base chassis and camera...
+      [0;32m[OK] RealSense already streaming - reusing it.[0m
+      [1;33mLaunching base drivers (driver_bringup.launch)...[0m
+      [0;32m[OK] Base chassis and camera active.[0m
+[2/4] Checking uArm manipulator driver...
+      [0;32m[OK] uArm manipulator active.[0m
+[3/4] Checking neural network cube detector (/detector_node)...
+      [1;33mLaunching neural network cube detector...[0m
+      Waiting for neural network weights initialization...
+      [0;32m[OK] Cube detector active and publishing to /objects.[0m
+[4/4] [0;36m[1mAll drivers ready. Starting grasp logic...[0m
+==========================================================
+
+[INFO] [1795331261.703141]: >> [VISION] items_config.yaml loaded, item ids: [3, 1, 2, 4]
+[INFO] [1795331261.713039]: >> [CALIB] matrix from /home/spark/transform_3d.dat: 1.05 px/mm at the workspace, round-trip 0.0 mm
+[INFO] [1795331261.714939]: >> [CALIB] fitted 2026-11-21T16:23:51 from 11 pose(s), leave-one-out max 1.1 px / mean 0.7 px
+[INFO] [1795331261.922535]: Setting arm motor status: True
+[CONFIG] Depth scale: 0.386784 | Cake touch z: 40.0 mm | Floor touch z: -55.0 mm
+[INFO] [1795331262.225380]: Setting arm motor status: True
+[INFO] [1795331266.937550]: >> [VISION] 1 cube(s) from 4 frame(s): [[2, [264, 40, 0]]]
+[SCAN_init] Detections (samples=5): [[2, [264, 40, 0]]]
+[SCAN_init] No valid cubes detected within camera field of play
+[DECISION] No valid targets detected on field.
+[INFO] [1795331266.942616]: Setting arm pump state: False
+[SAFE] Arm homed, vacuum pump disengaged.
+[COMPLETED] Result: NO_TARGET (Case None)
+
+==========================================================
+[0;31m[1m[ERROR] Test failed with exit code: 5[0m
+==========================================================
+=== grasp_scan_run.log ===
+[0;36m[1m
+==========================================================
+      SPARK ROBOT - CUBE GRASP PREPARATION & TEST       
+==========================================================
+[0m
+[1/4] Checking base chassis and camera...
+      [0;32m[OK] Base chassis and camera active.[0m
+[2/4] Checking uArm manipulator driver...
+      [0;32m[OK] uArm manipulator active.[0m
+[3/4] Checking neural network cube detector (/detector_node)...
+      [0;32m[OK] Cube detector active and publishing to /objects.[0m
+[4/4] [0;36m[1mAll drivers ready. Starting grasp logic...[0m
+==========================================================
+
+[INFO] [1795331419.673713]: >> [VISION] items_config.yaml loaded, item ids: [3, 1, 2, 4]
+[INFO] [1795331419.681952]: >> [CALIB] matrix from /home/spark/transform_3d.dat: 1.05 px/mm at the workspace, round-trip 0.0 mm
+[INFO] [1795331419.683552]: >> [CALIB] fitted 2026-11-21T16:23:51 from 11 pose(s), leave-one-out max 1.1 px / mean 0.7 px
+[INFO] [1795331419.889171]: Setting arm motor status: True
+[CONFIG] Depth scale: 0.386784 | Cake touch z: 40.0 mm | Floor touch z: -55.0 mm
+[INFO] [1795331420.191459]: Setting arm motor status: True
+[INFO] [1795331424.906461]: >> [VISION] 0 cube(s) from 4 frame(s): []
+[SCAN_init] Detections (samples=5): []
+[SCAN_init] No valid cubes detected within camera field of play
+[DECISION] No valid targets detected on field.
+[INFO] [1795331424.908089]: Setting arm pump state: False
+[SAFE] Arm homed, vacuum pump disengaged.
+[COMPLETED] Result: NO_TARGET (Case None)
+
+==========================================================
+[0;31m[1m[ERROR] Test failed with exit code: 5[0m
+==========================================================
+=== NAV TEST DIR ===
+total 76
+-rw-rw-r-- 1 spark spark 16645 11月 22 18:36 detector.log
+-rw-rw-r-- 1 spark spark 18992 11月 22 18:28 nav.log
+-rw-rw-r-- 1 spark spark 23376 11月 22 18:24 nav_prev.log
+-rw-rw-r-- 1 spark spark   603 11月 22 18:06 lidar.log
+-rw-rw-r-- 1 spark spark  2100 11月 22 18:06 driver.log
+=== ARM DRIVER CHECK ===
+=== ROS NODES ===
+/amcl
+/camera/color_rectify_color
+/camera/points_xyzrgb_hw_registered
+/camera/realsense2_camera
+/camera/realsense2_camera_manager
+/detector_node
+/joint_state_publisher
+/map_server_1795342040368977254
+/map_server_1795343082782549927
+/move_base
+/navigation_velocity_smoother
+/robot_state_publisher
+/rosout
+/spark_base_nodelet_manager
+/spark_base_server
+/tf_echo_1795342058438953315
+/tf_echo_1795342172087575823
+/tf_echo_1795342201755442690
+/tf_echo_1795342584187739193
+/tf_echo_1795342692079258965
+/tf_echo_1795342758343343705
+/tf_echo_1795342774900150710
+/tf_echo_1795342818053551682
+/tf_echo_1795343098499221206
+/ydlidar_lidar_publisher

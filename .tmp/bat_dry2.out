@@ -1,0 +1,30 @@
+======================================================================
+          AUTONOMOUS CUBE GRASP TEST (SPARK ROBOT)
+======================================================================
+
+[1/3] Checking connection to robot (10.24.170.0)...
+      Connection established.
+
+[2/3] Uploading updated code to robot (preserving robot's ~/transform_3d.dat)...
+      - Creating workspace directories...
+SSH -o StrictHostKeyChecking=accept-new spark@10.24.170.0 "mkdir -p /home/spark/codes /home/spark/logs /home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes"
+      - Uploading Python scripts to ~/codes/...
+SCP -o StrictHostKeyChecking=accept-new "D:\NXROBO\auto\codes\grasp_generic.py" "D:\NXROBO\auto\codes\robot_view.py" "D:\NXROBO\auto\codes\match_logic.py" "D:\NXROBO\auto\codes\runtask.py" "D:\NXROBO\auto\codes\detect_ros.py" "D:\NXROBO\auto\codes\pad_detect.py" "D:\NXROBO\auto\codes\patch_swiftpro.py" "D:\NXROBO\auto\codes\snap.py" "D:\NXROBO\auto\codes\run_grasp_test.sh" spark@10.24.170.0:/home/spark/codes/
+      - Uploading tier-2 calibration (thefile2.txt) without touching ~/transform_3d.dat...
+SCP -o StrictHostKeyChecking=accept-new "D:\NXROBO\auto\codes\thefile2.txt" spark@10.24.170.0:/home/spark/
+      - Syncing match_logic.py + detect_ros.py + pad_detect.py to ROS auto_match node...
+SCP -o StrictHostKeyChecking=accept-new "D:\NXROBO\auto\codes\match_logic.py" "D:\NXROBO\auto\codes\detect_ros.py" "D:\NXROBO\auto\codes\pad_detect.py" spark@10.24.170.0:/home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/
+      - Restarting detector so the new cake-confidence gate is applied...
+SSH -o StrictHostKeyChecking=accept-new spark@10.24.170.0 "pkill -f detect_ros.py 2>/dev/null; sleep 1"
+      - Setting execution permissions...
+SSH -o StrictHostKeyChecking=accept-new spark@10.24.170.0 "chmod +x /home/spark/codes/run_grasp_test.sh /home/spark/codes/*.py 2>/dev/null"
+      All codes uploaded fresh and ready.
+
+
+[3/3] Initializing drivers and running: --scan-only
+======================================================================
+
+SSH -tt -o StrictHostKeyChecking=accept-new spark@10.24.170.0 "bash -l /home/spark/codes/run_grasp_test.sh --scan-only"
+
+======================================================================
+Test finished. Press any key to close...

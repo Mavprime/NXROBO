@@ -53,9 +53,14 @@ def patch_file(filepath):
         with open(filepath, "w") as f:
             f.write(content)
         print("Patched:", filepath)
+        return True
     else:
-        print("Pattern not found in:", filepath)
+        print("Already patched or pattern not found in:", filepath)
+        return False
 
 if __name__ == "__main__":
-    patch_file("/home/spark/spark_noetic/src/spark_driver/arm/uArm/swiftpro/src/swiftpro_write_node.cpp")
-    patch_file("/home/spark/spark_noetic/src/spark_driver/arm/uArm/swiftpro/src/swiftpro_read_node.cpp")
+    p1 = patch_file("/home/spark/spark_noetic/src/spark_driver/arm/uArm/swiftpro/src/swiftpro_write_node.cpp")
+    p2 = patch_file("/home/spark/spark_noetic/src/spark_driver/arm/uArm/swiftpro/src/swiftpro_read_node.cpp")
+    if p1 or p2:
+        sys.exit(10) # Signal that recompile is needed
+    sys.exit(0)

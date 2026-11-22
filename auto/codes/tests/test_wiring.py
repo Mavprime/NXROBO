@@ -18,8 +18,12 @@ from _bootstrap import CODES_DIR  # noqa: E402
 
 RUNTASK = os.path.join(CODES_DIR, "runtask.py")
 DETECT_ROS = os.path.join(CODES_DIR, "detect_ros.py")
+CALIB3D = os.path.join(CODES_DIR, "calib3d.py")
 START_SYSTEM = os.path.join(CODES_DIR, "start_system.sh")
 STOP_SYSTEM = os.path.join(CODES_DIR, "stop_system.sh")
+DASHBOARD = os.path.join(CODES_DIR, "dashboard.sh")
+RUN_GRASP_SH = os.path.join(CODES_DIR, "run_grasp_test.sh")
+UPLOAD_PS1 = os.path.abspath(os.path.join(CODES_DIR, "..", "launchers", "upload.ps1"))
 
 #: Logic that must live in match_logic.py and must NOT be re-implemented in a
 #: test file (nor privately inside runtask.py).
@@ -122,6 +126,23 @@ class TestRuntaskUsesMatchLogic(unittest.TestCase):
     def test_run_task_is_defined(self):
         self.assertIn("run_task", defined_functions(RUNTASK))
 
+    def test_grasp1_uses_verified_cake_offset_constant(self):
+        """SI-37: grasp1 must use match_logic.CAKE_CUP_OFFSET_X, not stale 30.0."""
+        self.assertIn("CAKE_CUP_OFFSET_X", self.source)
+        self.assertNotIn("cup_offset_x=30.0", self.source)
+
+    def test_frames_buffer_supports_multi_sample_scans(self):
+        """SI-27: deque maxlen must be >= 16 so 5/6-sample scans do not stall."""
+        self.assertIn("deque(maxlen=max(16,", self.source)
+
+    def test_cancel_publisher_is_precreated(self):
+        self.assertIn("self.cancel_pub", self.source)
+        self.assertNotIn('rospy.Publisher("move_base/cancel", GoalID, queue_size=1).publish', self.source)
+
+    def test_calib3d_imports_pad_detect(self):
+        self.assertIn("from pad_detect import", read(CALIB3D))
+        self.assertNotIn("from calib_pad import", read(CALIB3D))
+
 
 class TestDetectorWiring(unittest.TestCase):
     def setUp(self):
@@ -151,6 +172,69 @@ class TestStartupScripts(unittest.TestCase):
 
     def test_stop_system_closes_the_bag(self):
         self.assertIn("rosbag record", read(STOP_SYSTEM))
+        self.assertIn("/pump_topic", read(STOP_SYSTEM))
+
+    def test_startup_scripts_do_not_force_tta_augment(self):
+        self.assertNotIn("_augment:=true", read(START_SYSTEM))
+        self.assertNotIn("_augment:=true", read(RUN_GRASP_SH))
+
+    def test_dashboard_checks_move_base_node_not_topic(self):
+        dash = read(DASHBOARD)
+        self.assertIn("rosnode list", dash)
+        self.assertNotIn("rostopic list 2>/dev/null | grep -qx '/move_base/status'", dash)
+
+    def test_upload_ps1_does_not_unconditionally_overwrite_calibration(self):
+        ps1 = read(UPLOAD_PS1)
+        self.assertIn("PushCalib", ps1)
+        self.assertIn("pad_detect.py", ps1)
+
+
+class TestLauncherLayout(unittest.TestCase):
+    """The Windows launchers must work from either the repo root or auto\\.
+
+    A full copy of run_grasp_test.bat was once extracted into auto\\ where
+    ``%~dp0auto\\codes`` resolves to ``auto\\auto\\codes``: every scp failed and
+    the operator saw a wall of SCP ERRORs.  The canonical launcher now resolves
+    the repository root itself, and any copy in auto\\ must be a forwarder.
+    """
+
+    def setUp(self):
+        self.repo_root = os.path.abspath(os.path.join(CODES_DIR, "..", ".."))
+        self.root_bat = os.path.join(self.repo_root, "run_grasp_test.bat")
+        self.scan_bat = os.path.join(self.repo_root, "run_scan_only.bat")
+
+    def test_root_launcher_exists(self):
+        self.assertTrue(os.path.isfile(self.root_bat),
+                        "run_grasp_test.bat must live in the repository root")
+
+    def test_root_launcher_resolves_the_repository_root(self):
+        source = read(self.root_bat)
+        self.assertIn("PROJECT_ROOT", source)
+        self.assertIn("%~dp0..", source,
+                      "the launcher must fall back to the parent directory "
+                      "when it is launched from auto\\")
+        self.assertNotIn("set SRC_DIR=%~dp0auto\\codes", source,
+                         "%~dp0auto\\codes only works from the repo root")
+
+    def test_root_launcher_does_not_hardcode_the_absolute_path(self):
+        self.assertNotIn("d:\\nxrobo", read(self.root_bat).lower(),
+                         "the repo must keep working from any checkout path")
+
+    def test_scan_only_launcher_forwards_without_duplicating_logic(self):
+        source = read(self.scan_bat)
+        self.assertIn("--scan-only", source)
+        self.assertNotIn("scp ", source)
+
+    def test_auto_copies_are_forwarders_not_full_copies(self):
+        for name in ("run_grasp_test.bat", "run_scan_only.bat"):
+            path = os.path.join(self.repo_root, "auto", name)
+            if not os.path.isfile(path):
+                continue
+            source = read(path)
+            self.assertIn("..\\run_grasp_test.bat", source,
+                          f"auto\\{name} must forward to the root launcher")
+            self.assertNotIn("scp ", source,
+                             f"auto\\{name} must not duplicate the upload logic")
 
 
 class TestTestsDoNotReimplementProductionLogic(unittest.TestCase):

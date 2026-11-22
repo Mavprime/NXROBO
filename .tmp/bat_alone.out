@@ -1,0 +1,10 @@
+
+======================================================================
+[LAYOUT ERROR] Cannot find auto\codes\run_grasp_test.sh
+
+This launcher must live in the repository root D:\NXROBO\
+(next to the auto\ folder), or in D:\NXROBO\auto\ .
+Current location: D:\NXROBO\.tmp\alone\
+======================================================================
+
+Press any key to continue . . . 

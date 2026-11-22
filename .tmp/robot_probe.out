@@ -1,0 +1,71 @@
+=== HOST ===
+spark
+2026年 11月 22日 星期日 18:36:20 CST
+=== FILE VERSIONS ===
+-rwxrwxr-x 1 spark spark 22999 11月 22 17:32 /home/spark/codes/grasp_generic.py
+-rwxrwxr-x 1 spark spark  5828 11月 22 17:32 /home/spark/codes/run_grasp_test.sh
+e3825ce12a12996813d9a1dd06617ed6  /home/spark/codes/grasp_generic.py
+574 /home/spark/codes/grasp_generic.py
+=== GRASP TEST LOG (last 30 runs) ===
+{"ts": "2026-11-22T01:53:41", "result": "SCANNED", "case": 2, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [409.0, 82.0], "xy": [414.7, -36.5], "z_est": null}}
+{"ts": "2026-11-22T01:55:31", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [343.0, 243.0], "xy": [285.4, 9.4], "z_est": null}}
+{"ts": "2026-11-22T02:09:36", "result": "SCANNED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 1, "pixel": [335.0, 299.0], "xy": [193.9, 1.2], "z_est": -114.2}}
+{"ts": "2026-11-22T02:10:01", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [331.0, 227.0], "xy": [321.2, 17.7], "z_est": null}}
+{"ts": "2026-11-22T02:10:56", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [332.0, 226.0], "xy": [339.0, 17.0], "z_est": null}}
+{"ts": "2026-11-22T02:13:54", "result": "PLACED_UNVERIFIED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [332.0, 211.0], "xy": [348.0, 17.0], "z_est": null}}
+{"ts": "2026-11-22T14:58:07", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:07:42", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:10:20", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:12:01", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:12:33", "result": "PLACED_UNVERIFIED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 1, "pixel": [334.0, 250.0], "xy": [242.0, -0.9], "z_est": -115.0}}
+{"ts": "2026-11-22T15:13:27", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:24:29", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:29:45", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [342.0, 208.0], "xy": [348.0, 10.1], "z_est": null}}
+{"ts": "2026-11-22T15:30:04", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [342.0, 208.0], "xy": [348.0, 10.1], "z_est": null}}
+{"ts": "2026-11-22T15:34:07", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [341.0, 242.0], "xy": [326.2, 10.8], "z_est": null}}
+{"ts": "2026-11-22T15:34:40", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [342.0, 343.0], "xy": [245.1, 10.1], "z_est": null}}
+{"ts": "2026-11-22T15:38:59", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:41:17", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:42:03", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:52:06", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:58:16", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [290.0, 190.0], "xy": [348.0, 46.2], "z_est": null}}
+{"ts": "2026-11-22T15:59:23", "result": "NO_TARGET"}
+{"ts": "2026-11-22T16:04:15", "result": "PLACED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [291.0, 188.0], "xy": [348.0, 45.5], "z_est": null}}
+{"ts": "2026-11-22T16:05:06", "result": "MISS", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [321.0, 248.0], "xy": [258.1, 11.3], "z_est": null}}
+{"ts": "2026-11-22T16:56:45", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [339.0, 210.0], "xy": [348.0, 12.2], "z_est": null}}
+{"ts": "2026-11-22T17:01:04", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [325.0, 136.0], "xy": [348.0, 21.9], "z_est": null}}
+{"ts": "2026-11-22T17:28:52", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [286.0, 240.0], "xy": [327.8, 49.0], "z_est": null}}
+{"ts": "2026-11-22T17:30:56", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [281.0, 239.0], "xy": [328.6, 52.5], "z_est": null}}
+{"ts": "2026-11-22T17:32:06", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [323.0, 167.0], "xy": [348.0, 23.3], "z_est": null}}
+=== RECENT LOG FILES ===
+total 2744
+drwxrwxr-x 2 spark spark   4096 11月 22 18:24 nav_test
+-rw-rw-r-- 1 spark spark   3942 11月 22 18:03 detect.log
+-rw-rw-r-- 1 spark spark  15911 11月 22 17:33 base.log
+-rw-rw-r-- 1 spark spark   2312 11月 22 17:33 arm.log
+-rw-rw-r-- 1 spark spark  14521 11月 22 17:32 grasp_generic.jsonl
+-rw-rw-r-- 1 spark spark     66 11月 22 17:17 stream.log
+-rw-rw-r-- 1 spark spark   3080 11月 22 16:12 lidar.log
+-rw-rw-r-- 1 spark spark   8786 11月 22 16:07 camera.log
+-rw-rw-r-- 1 spark spark  12229 11月 22 16:06 camera_driver.log
+-rw-rw-r-- 1 spark spark      0 11月 22 15:54 camera_nodelet.log
+-rw-rw-r-- 1 spark spark   1708 11月 22 15:10 grasp_scan_run.log
+-rw-rw-r-- 1 spark spark   1991 11月 22 15:07 grasp_test_run.log
+drwxrwxr-x 2 spark spark   4096 11月 22 02:16 bags
+-rw-rw-r-- 1 spark spark   1950 11月 22 02:16 rosbag.log
+drwxrwxr-x 2 spark spark   4096 11月 22 01:15 sim
+-rw-rw-r-- 1 spark spark    999 11月 21 22:34 runtask.log
+-rw-rw-r-- 1 spark spark      0 11月 21 22:34 nav.log
+-rw-rw-r-- 1 spark spark 103441 11月 21 21:15 now.jpg
+drwxrwxr-x 2 spark spark   4096 11月 21 21:08 grasp_generic
+-rw-rw-r-- 1 spark spark 104702 11月 21 20:59 scene_clean.jpg
+-rw-rw-r-- 1 spark spark 510001 11月 21 20:58 g0b.log
+-rw-rw-r-- 1 spark spark 105402 11月 21 20:52 final_scene_2.jpg
+-rw-rw-r-- 1 spark spark 106351 11月 21 20:50 probe_recon.jpg
+-rw-rw-r-- 1 spark spark 105629 11月 21 20:50 probe_dlt.jpg
+=== PROCESSES ===
+62618 python3 -u /home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/detect_ros.py _augment:=true _conf:=0.25
+70643 /home/spark/spark_noetic/devel/lib/spark_base/spark_base_node /dev/sparkBase __name:=spark_base_server __log:=/home/spark/.ros/log/5737d8c6-e65c-11f1-ae2a-af9c984fae55/spark_base_server-4.log
+71932 python3 -u /home/spark/codes/detect_ros.py
+74321 /opt/ros/noetic/lib/nodelet/nodelet manager __name:=spark_base_nodelet_manager __log:=/home/spark/.ros/log/5737d8c6-e65c-11f1-ae2a-af9c984fae55/spark_base_nodelet_manager-1.log
+74322 /opt/ros/noetic/lib/nodelet/nodelet load follower_velocity_smoother/VelocitySmootherNodelet spark_base_nodelet_manager navigation_velocity_smoother/smooth_cmd_vel:=/cmd_vel navigation_velocity_smoother/odometry:=/odom navigation_velocity_smoother/robot_cmd_vel:=/spark_base/command/velocity __name:=navigation_velocity_smoother __log:=/home/spark/.ros/log/5737d8c6-e65c-11f1-ae2a-af9c984fae55/navigation_velocity_smoother-2.log

@@ -1,0 +1,121 @@
+warning: in the working copy of '.tmp\bundle\auto\codes\match_logic.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'auto\codes\match_logic.py', LF will be replaced by CRLF the next time Git touches it
+diff --git "a/.tmp\\bundle\\auto\\codes\\match_logic.py" "b/auto\\codes\\match_logic.py"
+index 8c8efab..64be1b6 100644
+--- "a/.tmp\\bundle\\auto\\codes\\match_logic.py"
++++ "b/auto\\codes\\match_logic.py"
+@@ -299,6 +299,11 @@ def load_cake_calibration(path=None):
+ 
+ 
++#: Verified suction-cup forward offset for the elevated tier-2 Cake (mm).
++#: Single source of truth shared by match_logic, runtask.grasp1 and grasp_generic.
++CAKE_CUP_OFFSET_X = 125.0
++
++
+ def pixel_to_cake_xy(M, u, v, fx=CAM_FX, fy=CAM_FY, cx=CAM_CX, cy=CAM_CY,
+-                     calib_file=None, cup_offset_x=125.0, clamp=True):
++                     calib_file=None, cup_offset_x=CAKE_CUP_OFFSET_X, clamp=True):
+     """Dedicated approximation for the competition Cake (Tier 2 / 20 cm height).
+ 
+@@ -638,5 +643,5 @@ def check_transform(M, fx=CAM_FX, fy=CAM_FY, cx=CAM_CX, cy=CAM_CY):
+ CONF_THRESHOLD = 0.35      # grasp-grade confidence (lowered from 0.45 to support Banana cubes)
+ CLUSTER_DIST_PX = 45.0     # boxes closer than this are the same cube
+-DEDUPE_DIST_PX = 60.0      # two models reporting the same cube
++DEDUPE_DIST_PX = 80.0      # two models / *_site aliases reporting the same cube (SI-26)
+ MIN_HIT_RATIO = 0.5        # share of frames a cluster must appear in
+ 
+@@ -695,5 +700,5 @@ def in_scan_window(u, v):
+ 
+ 
+-def far_target_xy(M, u, v, is_cake, cup_offset_x=125.0,
++def far_target_xy(M, u, v, is_cake, cup_offset_x=CAKE_CUP_OFFSET_X,
+                   plane_z=FAR_FLOOR_PLANE_Z,
+                   cup_correction_x=FAR_FLOOR_CUP_OFFSET_X):
+@@ -793,18 +798,24 @@ def cluster_detections(frames, conf_threshold=CONF_THRESHOLD,
+             match["ys"].append(float(cy))
+ 
++    min_cake_hits = 1 if len(frames) < 2 else 2
+     cubes = []
+     for cluster in clusters:
++        cake_hits = sum(1 for c in cluster["ids"] if is_cake(c))
+         if len(cluster["ids"]) < min_hits:
+-            # Operator requirement: Cake priority rule. If a cluster contains Cake,
+-            # it must not be discarded even if detected in fewer frames than other
+-            # cubes.  Only detections above the per-class cake gates get here.
+-            if any(is_cake(c) for c in cluster["ids"]):
++            # Operator requirement: Cake priority rule. A Cake cluster may
++            # survive with fewer hits than other cubes, but still requires at
++            # least 2 frames in a multi-frame window so a 1-frame glare cannot
++            # hijack the mission.
++            if cake_hits >= min_cake_hits:
+                 pass
+             else:
+                 continue
+-        # Cake priority rule: only for elevated top cubes (y < 215 px), cake detections take precedence.
+-        # Ground and pedestal clusters (y >= 215 px) use majority voting so banana pedestal isn't mislabeled.
++        # Cake priority rule: only inside the near-field elevated pedestal band
++        # (NEAR_FIELD_V[0] <= mean_y < 215 px) does a Cake hit override majority
++        # voting.  Far-field floor cubes (v < 130) and ground clusters (v >= 215)
++        # use strict majority voting.
+         mean_y = sum(cluster["ys"]) / len(cluster["ys"])
+-        if mean_y < 215.0 and any(is_cake(c) for c in cluster["ids"]):
++        if (NEAR_FIELD_V[0] <= mean_y < 215.0
++                and cake_hits >= min_cake_hits):
+             cid = CAKE_ID
+         else:
+@@ -816,15 +827,28 @@ def cluster_detections(frames, conf_threshold=CONF_THRESHOLD,
+ 
+ 
++def _canonical_box_class(box):
++    """Canonical class key for de-duplication (merges ``<item>_site`` aliases)."""
++    if "class_id" in box and box["class_id"] is not None:
++        return str(norm_id(box["class_id"]))
++    name = str(box.get("name", "") or "").strip().lower()
++    if name.endswith("_site"):
++        name = name[:-5]
++    return name
++
++
+ def dedupe_boxes(boxes, dist_px=DEDUPE_DIST_PX):
+-    """Drop cross-model duplicates: same class, centres closer than ``dist_px``.
++    """Drop cross-model duplicates: same canonical class, closer than ``dist_px``.
+ 
+     ``boxes`` are dicts with ``name``, ``score``, ``cx``, ``cy`` (extra keys are
+-    preserved).  The highest-confidence box of each coincident group survives.
++    preserved).  ``<item>_site`` aliases (e.g. ``banana`` and ``banana_site``)
++    are treated as the same canonical class so one physical cube is not emitted
++    twice (SI-26).  The highest-confidence box of each coincident group survives.
+     """
+     kept = []
+     for box in sorted(boxes, key=lambda b: -float(b.get("score", 0.0))):
++        box_cls = _canonical_box_class(box)
+         duplicate = False
+         for other in kept:
+-            if other.get("name") != box.get("name"):
++            if _canonical_box_class(other) != box_cls:
+                 continue
+             if math.hypot(box["cx"] - other["cx"], box["cy"] - other["cy"]) < dist_px:
+@@ -836,4 +860,23 @@ def dedupe_boxes(boxes, dist_px=DEDUPE_DIST_PX):
+ 
+ 
++def cube_still_present(cubes, orig_uv, radius_px=40.0):
++    """True when a cube is still visible near ``orig_uv`` after a lift (SI-28).
++
++    Used as a cheap software grasp-verification check when no vacuum pressure
++    sensor is installed: a lifted cube leaves its pickup pixel empty.
++    """
++    if not cubes or orig_uv is None:
++        return False
++    ou, ov = float(orig_uv[0]), float(orig_uv[1])
++    for cube in cubes:
++        try:
++            u, v = float(cube[1][0]), float(cube[1][1])
++        except Exception:
++            continue
++        if math.hypot(u - ou, v - ov) <= float(radius_px):
++            return True
++    return False
++
++
+ def select_grasp_candidate(cubes, preferred_id=None, center_x=320.0, y_ref=260.0):
+     """Pick the cube closest to the optical centre line (ahead of the robot).

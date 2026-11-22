@@ -89,6 +89,174 @@ class TestTemporalVotingAndClustering(unittest.TestCase):
         self.assertEqual(match_logic.cluster_detections(scattered), [])
 
 
+class TestCakeAntiGlareGate(unittest.TestCase):
+    """The cake has FSM priority, so a cheap false positive must never pass.
+
+    Live measurements on the robot (394 cake boxes over 20 s):
+      * raw id 2  ("cake", plain class): false positives on banana cubes up to
+        0.852; the real field cake is NOT reported by this class.
+      * raw id 20 ("cake_site", what the real Cake cube produces): real cake
+        0.440..0.873, false cake_site (clock faces, banana cubes) 0.030..0.527.
+    Hence two separate gates: strict for id 2, 0.60 for id 20.
+    """
+
+    def test_persistent_low_confidence_cake_is_rejected(self):
+        frames = [frame((2, 0.55, 320, 200)) for _ in range(10)]
+        self.assertEqual(match_logic.cluster_detections(frames), [],
+                         "a 0.55 cake glare must not become a target")
+
+    def test_live_glare_score_is_rejected(self):
+        """Live field data: false cake(id 2) on a banana cube reached 0.852."""
+        frames = [frame((2, 0.852, 353, 292)) for _ in range(10)]
+        self.assertEqual(match_logic.cluster_detections(frames), [],
+                         "the measured 0.852 false cake must not become a target")
+
+    def test_high_confidence_cake_id2_is_kept(self):
+        frames = [frame((2, 0.92, 320, 200)) for _ in range(10)]
+        result = match_logic.cluster_detections(frames)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][0], match_logic.CAKE_ID)
+
+    def test_low_confidence_cake_does_not_relabel_a_real_cube(self):
+        """A false cake on top of a teddy must not force the class to Cake."""
+        frames = [frame((1, 0.90, 320, 200), (2, 0.45, 322, 201))
+                  for _ in range(10)]
+        result = match_logic.cluster_detections(frames)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][0], match_logic.TEDDY_ID,
+                         "a 0.45 cake hypothesis must not hijack the teddy")
+
+    def test_cake_id2_gate_is_configurable(self):
+        frames = [frame((2, 0.50, 320, 200)) for _ in range(10)]
+        result = match_logic.cluster_detections(frames,
+                                                cake_conf_threshold=0.40)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][0], match_logic.CAKE_ID)
+
+    # --- cake_site (id 20): the class that actually sees the field Cake -----
+
+    def test_real_cake_site_is_kept(self):
+        """Measured real-cake cake_site scores pass the 0.60 gate."""
+        for score in (0.62, 0.70, 0.87):
+            frames = [frame((20, score, 340, 160)) for _ in range(10)]
+            result = match_logic.cluster_detections(frames)
+            self.assertEqual(len(result), 1, "real cake_site %.2f dropped" % score)
+            self.assertEqual(result[0][0], match_logic.CAKE_ID)
+
+    def test_false_cake_site_is_rejected(self):
+        """Measured false cake_site (clock face) goes up to 0.527."""
+        frames = [frame((20, 0.527, 506, 349)) for _ in range(10)]
+        self.assertEqual(match_logic.cluster_detections(frames), [])
+
+    def test_cake_site_gate_is_configurable(self):
+        frames = [frame((20, 0.55, 340, 160)) for _ in range(10)]
+        result = match_logic.cluster_detections(
+            frames, cake_site_conf_threshold=0.50)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][0], match_logic.CAKE_ID)
+
+    def test_measured_thresholds(self):
+        """Guards against silently lowering the gates below the measured noise."""
+        self.assertGreater(match_logic.CAKE_CONF_THRESHOLD, 0.852,
+                           "id-2 gate must stay above the measured 0.852 noise")
+        self.assertGreater(match_logic.CAKE_SITE_CONF_THRESHOLD, 0.527,
+                           "id-20 gate must stay above the measured 0.527 noise")
+        self.assertLessEqual(match_logic.CAKE_SITE_CONF_THRESHOLD, 0.70,
+                             "id-20 gate must stay below the real cake's "
+                             "typical 0.70+ score")
+
+
+class TestCakeCubeFaceVeto(unittest.TestCase):
+    """An ordinary cube's white front face must never be taken for the Cake.
+
+    Live bug report: on a field WITHOUT the cake the robot recognised a banana
+    cube's side as the cake.  Measured on /objects: ``wine_site`` (raw id 20)
+    0.761 on the white front face at (194, 340) of the banana cube whose print
+    is at (186, 272) - INSIDE the real-cake score range 0.76..0.87, so the
+    confidence gate cannot reject it.  The owner print right above the face
+    can, and that is what these tests pin down.
+    """
+
+    BANANA_PRINT = (4, 0.705, 186, 272)   # live measurement, /objects frame
+    BANANA_FACE = (20, 0.761, 194, 340)   # live false cake_site on that cube
+    REAL_CAKE = (20, 0.760, 337, 213)     # live real cake site, same session
+
+    def test_live_banana_side_is_not_a_cake_target(self):
+        frames = [frame(self.BANANA_FACE, self.BANANA_PRINT) for _ in range(10)]
+        ids = [cube[0] for cube in match_logic.cluster_detections(frames)]
+        self.assertNotIn(match_logic.CAKE_ID, ids,
+                         "the banana cube's white side must not become the cake")
+        self.assertEqual(ids, [match_logic.BANANA_ID],
+                         "only the banana cube itself may be targeted")
+
+    def test_banana_cube_itself_stays_a_target(self):
+        frames = [frame(self.BANANA_PRINT, self.BANANA_FACE) for _ in range(10)]
+        result = match_logic.cluster_detections(frames)
+        self.assertEqual(len(result), 1, "the banana cube itself must stay")
+        self.assertEqual(result[0][0], match_logic.BANANA_ID)
+        self.assertEqual(result[0][1][:2], [186, 272],
+                         "target must stay on the print, not on the side face")
+
+    def test_clock_face_veto_uses_its_own_print(self):
+        frames = [frame((20, 0.66, 340, 199), (3, 0.911, 339, 131))
+                  for _ in range(10)]
+        ids = [cube[0] for cube in match_logic.cluster_detections(frames)]
+        self.assertEqual(ids, [match_logic.CLOCK_ID],
+                         "the clock face must not become a cake target")
+
+    def test_real_cake_site_is_kept(self):
+        """The real Cake face has no recognised cube print right above it."""
+        frames = [frame(self.REAL_CAKE, (3, 0.910, 340, 27)) for _ in range(10)]
+        ids = [cube[0] for cube in match_logic.cluster_detections(frames)]
+        self.assertIn(match_logic.CAKE_ID, ids,
+                      "the real cake site must stay a target")
+
+    def test_neighbour_column_print_does_not_own_the_face(self):
+        frames = [frame(self.REAL_CAKE, self.BANANA_PRINT) for _ in range(10)]
+        ids = [cube[0] for cube in match_logic.cluster_detections(frames)]
+        self.assertIn(match_logic.CAKE_ID, ids,
+                      "a print 150 px to the side must not veto the cake")
+        self.assertIn(match_logic.BANANA_ID, ids)
+
+    def test_print_below_the_face_is_not_an_owner(self):
+        frames = [frame((20, 0.76, 300, 200), (1, 0.90, 300, 300))
+                  for _ in range(10)]
+        ids = [cube[0] for cube in match_logic.cluster_detections(frames)]
+        self.assertIn(match_logic.CAKE_ID, ids)
+
+    def test_owner_helper_geometry_and_inputs(self):
+        # print 68 px above the face owns it
+        self.assertEqual(
+            match_logic.cake_face_owner([(4, 0.70, 186, 272)], 194, 340),
+            (4, 0.70, 186, 272))
+        # *_site alias (raw 40) is not print evidence
+        self.assertIsNone(
+            match_logic.cake_face_owner([(40, 0.90, 337, 145)], 337, 213))
+        # too weak a print is not evidence
+        self.assertIsNone(
+            match_logic.cake_face_owner([(1, 0.20, 337, 145)], 337, 213))
+        # too far above / too far to the side is not evidence either
+        self.assertIsNone(
+            match_logic.cake_face_owner([(1, 0.90, 337, 27)], 337, 213))
+        self.assertIsNone(
+            match_logic.cake_face_owner([(1, 0.90, 186, 145)], 337, 213))
+
+    def test_veto_is_configurable(self):
+        frames = [frame(self.BANANA_FACE, self.BANANA_PRINT) for _ in range(10)]
+        result = match_logic.cluster_detections(frames, cake_owner_conf=0.99)
+        ids = [cube[0] for cube in result]
+        self.assertIn(match_logic.CAKE_ID, ids,
+                      "disabling the veto must restore the old (buggy) behaviour")
+
+    def test_owner_geometry_matches_live_measurement(self):
+        """Guards the constants against silent drift from the measured field."""
+        self.assertEqual(match_logic.CAKE_OWNER_DY_PX, (45.0, 110.0))
+        self.assertEqual(match_logic.CAKE_OWNER_DU_PX, 55.0)
+        self.assertLessEqual(match_logic.CAKE_OWNER_PRINT_CONF, 0.705,
+                             "the live banana print scored 0.705")
+        self.assertNotIn(match_logic.CAKE_ID, match_logic.CAKE_OWNER_PRINT_IDS)
+
+
 class TestCrossModelDedupe(unittest.TestCase):
     """dedupe_boxes() is what detect_ros.py applies before publishing /objects."""
 
@@ -115,6 +283,40 @@ class TestCrossModelDedupe(unittest.TestCase):
         boxes = [self.box("bear", 0.9, 100, 100), self.box("bear", 0.8, 140, 100)]
         self.assertEqual(len(match_logic.dedupe_boxes(boxes, dist_px=20)), 2)
         self.assertEqual(len(match_logic.dedupe_boxes(boxes, dist_px=60)), 1)
+
+    def test_site_alias_and_base_class_merge_within_default_radius(self):
+        """SI-26: banana (id 4) and banana_site (id 40) 67 px apart must merge."""
+        boxes = [
+            self.box("banana", 0.52, 221, 183),
+            self.box("banana_site", 0.48, 218, 250),
+        ]
+        kept = match_logic.dedupe_boxes(boxes)
+        self.assertEqual(len(kept), 1)
+        self.assertAlmostEqual(kept[0]["score"], 0.52)
+
+    def test_single_frame_cake_glare_in_multiframe_window_is_rejected(self):
+        """A 1-frame cake_site spike in a 4-frame window must not hijack the FSM."""
+        frames = [frame((20, 0.70, 320, 170)), [], [], []]
+        self.assertEqual(match_logic.cluster_detections(frames), [])
+
+    def test_far_field_floor_cube_is_not_hijacked_by_cake_override(self):
+        """A far floor cube (v < 130) with 1 cake flicker uses majority vote."""
+        frames = [
+            frame((4, 0.75, 345, 107)),
+            frame((4, 0.78, 346, 108)),
+            frame((4, 0.80, 344, 106)),
+            frame((20, 0.65, 345, 107)),
+        ]
+        result = match_logic.cluster_detections(frames)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][0], match_logic.BANANA_ID)
+
+    def test_cube_still_present_post_lift_check(self):
+        """SI-28: detect whether the cube remained at its pickup pixel."""
+        cubes = [[4, [295, 222, 0]]]
+        self.assertTrue(match_logic.cube_still_present(cubes, (292, 224)))
+        self.assertFalse(match_logic.cube_still_present(cubes, (120, 224)))
+        self.assertFalse(match_logic.cube_still_present([], (292, 224)))
 
 
 class TestGraspCandidateSelection(unittest.TestCase):

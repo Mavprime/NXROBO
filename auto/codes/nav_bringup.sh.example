@@ -25,7 +25,6 @@ set -o pipefail
 
 source /opt/ros/noetic/setup.bash || exit 1
 source "$HOME/spark_noetic/devel/setup.bash" || exit 1
-source "$HOME/spark_noetic/devel/setup.bash" || exit 1
 
 PKG="$(rospack find auto_match)" || { echo "auto_match package not found"; exit 1; }
 MAP="${MAP_FILE:-$PKG/config/test_map.yaml}"

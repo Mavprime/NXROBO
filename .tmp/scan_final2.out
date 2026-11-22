@@ -1,0 +1,10 @@
+[INFO] [1795349609.913764]: Setting arm motor status: True
+[CONFIG] depth scale=0.386784 | cake touch z=40.0 mm | floor touch z=-55.0 mm
+[INFO] [1795349614.626831]: >> [VISION] 6 cube(s) from 4 frame(s): [[3, [451, 97, 0]], [3, [452, 34, 0]], [4, [308, 47, 0]], [2, [187, 112, 0]], [2, [312, 105, 0]], [4, [90, 426, 0]]]
+[SCAN_init] Detections (samples=5, conf>=0.04, cake_conf>=0.90, cake_site_conf>=0.60): [[3, [451, 97, 0]], [3, [452, 34, 0]], [4, [308, 47, 0]], [2, [187, 112, 0]], [2, [312, 105, 0]], [4, [90, 426, 0]]]
+[SCAN_init] 5 target(s) beyond the calibrated near field (out of arm reach): [(3, 451.0, 97.0), (3, 452.0, 34.0), (4, 308.0, 47.0), (2, 187.0, 112.0), (2, 312.0, 105.0)] -> base approach required
+[SCAN_init] Chosen target: mode=cake class=2 pixel=[312.0, 105.0] far=True
+[DECISION] (Attempt 1/4) 5) Target beyond the near field (OUT OF ARM REACH) -> base approach step, then re-scan
+[TARGET] mode=cake class=2 xy=(436.2, 30.9) far=True in_reach=False dist=437.3 z_est=None
+[SCAN-ONLY] Assessment complete; no motion command was sent.
+[COMPLETED] result=SCANNED

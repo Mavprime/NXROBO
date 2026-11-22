@@ -1,0 +1,9 @@
+[INFO] [1795355476.467233]: >> [VISION] items_config.yaml loaded, item ids: [3, 1, 2, 4]
+[INFO] [1795355476.475178]: >> [CALIB] matrix from /home/spark/transform_3d.dat: 1.05 px/mm at the workspace, round-trip 0.0 mm
+[ERROR] [1795355476.477454]: >> [CALIB] MD5 MISMATCH between /home/spark/transform_3d.dat (040c5a6d) and transform_3d.meta.json (5067d5ab)! Matrix may have been overwritten; forcing active pad check.
+[INFO] [1795355476.681807]: Setting arm motor status: True
+[DIAG] pose=(270.0, 0.0, 30.0) image=(480, 640, 3) saved=/home/spark/logs/check_pose.jpg
+      pad blob area=324 at (346.8, 131.6)
+[DIAG] pad_pixel strict -> (346.8420781893004, 131.59156378600824, 324.0)
+[DIAG] orange blobs (area, u, v): ['(324, 346.8, 131.6)']
+[DIAG] arm parked

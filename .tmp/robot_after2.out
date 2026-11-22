@@ -1,0 +1,23 @@
+=== LAST JSONL LINES ===
+{"ts": "2026-11-22T18:44:11", "result": "DONE", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [332.0, 164.0], "xy": [348.0, 17.0], "z_est": null}, "plan": {"mode": "cake", "x": 348.0, "y": 17.0, "z_approach": 75.0, "z_touch": 37.0, "z_lift": 80.0, "class_id": 2, "pixel": [332.0, 164.0]}, "hold_seconds": 5.0}
+{"ts": "2026-11-22T18:58:01", "result": "DONE", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [344.0, 350.0], "xy": [239.5, 8.7], "z_est": null}, "plan": {"mode": "cake", "x": 239.5, "y": 8.7, "z_approach": 75.0, "z_touch": 37.0, "z_lift": 80.0, "class_id": 2, "pixel": [344.0, 350.0]}, "hold_seconds": 5.0}
+{"ts": "2026-11-22T18:58:36", "result": "ABORTED", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [345.0, 351.0], "xy": [238.7, 8.0], "z_est": null}, "plan": {"mode": "cake", "x": 238.7, "y": 8.0, "z_approach": 75.0, "z_touch": 37.0, "z_lift": 80.0, "class_id": 2, "pixel": [345.0, 351.0]}, "hold_seconds": 5.0}
+=== ARM STATE AFTER ABORT ===
+motor_angle1: 0.0
+motor_angle2: 0.0
+motor_angle3: 0.0
+motor_angle4: 0.0
+x: 50.0
+y: 180.0
+z: 160.0
+pump: 0
+swiftpro_status: 1
+gripper: 0
+---
+=== NODES ===
+/detector_node
+/spark_base_server
+/swiftpro_read_node
+/swiftpro_rviz_node
+/swiftpro_write_node
+=== DONE ===

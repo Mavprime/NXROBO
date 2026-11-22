@@ -1,0 +1,42 @@
+[VIEW] waiting for /objects and /camera/color/image_raw ...
+
+=== WHAT THE ROBOT SEES ===
+raw detections published by the detector on /objects (last frame): 15
+  teddy          id=1   score=0.93 center=(184, 154) box=94x88
+  teddy          id=1   score=0.92 center=(487, 138) box=95x86
+  teddy          id=1   score=0.92 center=(468, 31) box=87x63
+  clock          id=3   score=0.96 center=(514, 284) box=107x105
+  clock          id=3   score=0.92 center=(337, 147) box=94x85
+  clock          id=3   score=0.92 center=(333, 35) box=84x69
+  banana         id=4   score=0.80 center=(189, 42) box=103x78
+  banana         id=4   score=0.79 center=(179, 299) box=137x119
+  banana         id=4   score=0.76 center=(347, 297) box=133x116
+  banana         id=4   score=0.34 center=(66, 194) box=127x367
+  teddy_site(10) id=10  score=0.88 center=(185, 220) box=96x46
+  teddy_site(10) id=10  score=0.73 center=(485, 209) box=96x47
+  clock_site(30) id=30  score=0.91 center=(444, 296) box=38x106
+  clock_site(30) id=30  score=0.87 center=(333, 213) box=100x42
+  clock_site(30) id=30  score=0.63 center=(334, 88) box=93x33
+
+=== AFTER TEMPORAL CLUSTERING + CAKE GATE (what the grasp logic uses) ===
+ordinary conf floor: 0.04 | cake gate: 0.85
+  TARGET CANDIDATE: teddy id=1 at px=(487, 138)
+  TARGET CANDIDATE: teddy id=1 at px=(184, 154)
+  TARGET CANDIDATE: teddy id=1 at px=(468, 31)
+  TARGET CANDIDATE: teddy id=1 at px=(485, 209)
+  TARGET CANDIDATE: teddy id=1 at px=(185, 220)
+  TARGET CANDIDATE: clock id=3 at px=(514, 284)
+  TARGET CANDIDATE: clock id=3 at px=(443, 297)
+  TARGET CANDIDATE: clock id=3 at px=(337, 147)
+  TARGET CANDIDATE: clock id=3 at px=(332, 35)
+  TARGET CANDIDATE: clock id=3 at px=(334, 213)
+  TARGET CANDIDATE: clock id=3 at px=(334, 88)
+  TARGET CANDIDATE: banana id=4 at px=(189, 43)
+  TARGET CANDIDATE: banana id=4 at px=(179, 299)
+  TARGET CANDIDATE: banana id=4 at px=(347, 298)
+  TARGET CANDIDATE: banana id=4 at px=(66, 195)
+
+[VIEW] saved: /home/spark/logs/latest_view.jpg
+[VIEW] saved: /home/spark/logs/view_20261122_191940.jpg
+=== EXIT: 0 ===
+-rw-rw-r-- 1 spark spark 82993 11月 22 19:19 /home/spark/logs/latest_view.jpg

@@ -1,0 +1,60 @@
+      SPARK ROBOT - CUBE GRASP PREPARATION & TEST       
+==========================================================
+[0m
+Already patched or pattern not found in: /home/spark/spark_noetic/src/spark_driver/arm/uArm/swiftpro/src/swiftpro_write_node.cpp
+Already patched or pattern not found in: /home/spark/spark_noetic/src/spark_driver/arm/uArm/swiftpro/src/swiftpro_read_node.cpp
+[1/4] Checking base chassis and camera...
+      [0;32m[OK] Base chassis and camera active.[0m
+[2/4] Checking uArm manipulator driver...
+      [0;32m[OK] uArm manipulator active.[0m
+[3/4] Checking neural network cube detector (/detector_node)...
+      [0;32m[OK] Cube detector active and publishing to /objects.[0m
+[4/4] [0;36m[1mAll drivers ready. Starting grasp logic...[0m
+==========================================================
+
+[INFO] [1795349501.774179]: >> [VISION] items_config.yaml loaded, item ids: [3, 1, 2, 4]
+[INFO] [1795349501.783766]: >> [CALIB] matrix from /home/spark/transform_3d.dat: 1.05 px/mm at the workspace, round-trip 0.0 mm
+[INFO] [1795349501.785750]: >> [CALIB] fitted 2026-11-22T15:38:34 from 11 pose(s), leave-one-out max 0.7 px / mean 0.5 px
+[INFO] [1795349501.990961]: Setting arm motor status: True
+[INFO] [1795349502.292593]: Setting arm motor status: True
+[CONFIG] depth scale=0.386784 | cake touch z=40.0 mm | floor touch z=-55.0 mm
+[INFO] [1795349507.005961]: >> [VISION] 6 cube(s) from 4 frame(s): [[3, [468, 37, 0]], [3, [465, 103, 0]], [2, [199, 114, 0]], [2, [324, 111, 0]], [4, [324, 49, 0]], [4, [85, 427, 0]]]
+[SCAN_init] Detections (samples=5, conf>=0.04, cake_conf>=0.90, cake_site_conf>=0.60): [[3, [468, 37, 0]], [3, [465, 103, 0]], [2, [199, 114, 0]], [2, [324, 111, 0]], [4, [324, 49, 0]], [4, [85, 427, 0]]]
+[SCAN_init] 5 target(s) beyond the calibrated near field (out of arm reach): [(3, 468.0, 37.0), (3, 465.0, 103.0), (2, 199.0, 114.0), (2, 324.0, 111.0), (4, 324.0, 49.0)] -> base approach required
+[SCAN_init] Chosen target: mode=cake class=2 pixel=[324.0, 111.0] far=True
+[DECISION] (Attempt 1/4) 5) Target beyond the near field (OUT OF ARM REACH) -> base approach step, then re-scan
+[TARGET] mode=cake class=2 xy=(431.4, 22.6) far=True in_reach=False dist=432.0 z_est=None
+[APPROACH] Aligning heading: 3.0 deg
+[INFO] [1795349507.063963]: >> [VISUAL-SERVO] Fast base turn: 3.0 deg, duration 0.08s, vel=0.75 rad/s
+[APPROACH] Single drive: +12.7 cm (target dist: 432 mm, desired: 305 mm, far-field estimate)
+[INFO] [1795349507.722405]: >> [VISUAL-SERVO] Base distance correction: 12.7 cm, duration 0.71s, vel=0.18 m/s
+[APPROACH] Base motion complete. Settling the chassis for 0.85 s ...
+[RETRY] Base stopped; re-scanning and re-checking the reach ...
+[INFO] [1795349513.458591]: >> [VISION] 12 cube(s) from 4 frame(s): [[3, [530, 156, 0]], [1, [238, 33, 0]], [1, [517, 35, 0]], [3, [523, 224, 0]], [3, [378, 35, 0]], [2, [365, 218, 0]], [2, [230, 213, 0]], [4, [221, 150, 0]], [1, [234, 85, 0]], [4, [373, 156, 0]], [4, [75, 424, 0]], [4, [76, 188, 0]]]
+[SCAN_approach_1] Detections (samples=5, conf>=0.04, cake_conf>=0.90, cake_site_conf>=0.60): [[3, [530, 156, 0]], [1, [238, 33, 0]], [1, [517, 35, 0]], [3, [523, 224, 0]], [3, [378, 35, 0]], [2, [365, 218, 0]], [2, [230, 213, 0]], [4, [221, 150, 0]], [1, [234, 85, 0]], [4, [373, 156, 0]], [4, [75, 424, 0]], [4, [76, 188, 0]]]
+[SCAN_approach_1] 6 target(s) beyond the calibrated near field (out of arm reach): [(1, 238.0, 33.0), (1, 517.0, 35.0), (3, 378.0, 35.0), (1, 234.0, 85.0), (4, 75.0, 424.0), (4, 76.0, 188.0)] -> base approach required
+[TARGET] Cake depth reading hit floor/background (z=-147.2) -> using cake affine
+[TARGET] Cake depth reading hit floor/background (z=-142.9) -> using cake affine
+[SCAN_approach_1] Chosen target: mode=cake class=2 pixel=[365.0, 218.0] far=False
+[DECISION] (Attempt 2/4) 1) Cake IN REACH -> pick immediately without base motion
+[TARGET] mode=cake class=2 xy=(345.5, -5.9) far=False in_reach=True dist=345.6 z_est=None
+======================================================================
+GRASP -> LIFT -> HOLD 5.0 s -> RETURN -> PARK
+plan: mode=cake class=2 xy=(345.5, -5.9) approach=75.0 touch=37.0 lift=80.0
+======================================================================
+[1/6] Lowering the manipulator above the cube (z=75.0 mm)
+[2/6] Vacuum ON; descending strictly vertically to the cube (z=37.0 mm)
+[INFO] [1795349515.167742]: Setting arm pump state: True
+[3/6] Raising the cube strictly vertically (z=80.0 mm)
+[4/6] Holding the cube in the raised position for 5.0 s
+      hold finished
+[5/6] Lowering the cube strictly vertically back to the pickup point
+      cube is resting on the ground: vacuum OFF
+[INFO] [1795349526.428140]: Setting arm pump state: False
+[6/6] Returning the manipulator to its initial position (50.0, 180.0, 160.0)
+[DONE] Cube returned to its original position; arm parked.
+[COMPLETED] result=DONE
+
+==========================================================
+[0;32m[1m[OK] Test completed successfully.[0m
+==========================================================

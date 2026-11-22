@@ -1,0 +1,73 @@
+=== DEPLOYED CAKE GATES ===
+/home/spark/codes/match_logic.py:525:CAKE_CONF_THRESHOLD = 0.90
+/home/spark/codes/match_logic.py:535:CAKE_SITE_CONF_THRESHOLD = 0.60
+/home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/match_logic.py:525:CAKE_CONF_THRESHOLD = 0.90
+/home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/match_logic.py:535:CAKE_SITE_CONF_THRESHOLD = 0.60
+/home/spark/codes/detect_ros.py:47:CAKE_PUBLISH_CONF = 0.90
+/home/spark/codes/detect_ros.py:48:CAKE_SITE_PUBLISH_CONF = 0.60
+/home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/detect_ros.py:47:CAKE_PUBLISH_CONF = 0.90
+/home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/detect_ros.py:48:CAKE_SITE_PUBLISH_CONF = 0.60
+=== RESTART DETECTOR WITH PRODUCTION DEFAULTS 19:43:19 ===
+[INFO] [1795347805.668208]: >> [DETECTOR] publish_conf=0.25, cake_publish_conf=0.03, cake_site_publish_conf=0.60 (anti-glare gates)
+
+=== VIEW WITH PRODUCTION GATES ===
+[VIEW] waiting for /objects and /camera/color/image_raw ...
+
+=== WHAT THE ROBOT SEES ===
+raw detections published by the detector on /objects (last frame): 19
+  teddy          id=1   score=0.94 center=(184, 155) box=94x88
+  teddy          id=1   score=0.93 center=(487, 138) box=96x83
+  teddy          id=1   score=0.91 center=(470, 31) box=93x63
+  cake           id=2   score=0.72 center=(187, 36) box=81x71  <-- cake below anti-glare gate (0.90), ignored
+  cake           id=2   score=0.38 center=(354, 294) box=109x112  <-- cake below anti-glare gate (0.90), ignored
+  cake           id=2   score=0.24 center=(172, 294) box=109x105  <-- cake below anti-glare gate (0.90), ignored
+  cake           id=2   score=0.07 center=(344, 87) box=108x94  <-- cake below anti-glare gate (0.90), ignored
+  clock          id=3   score=0.95 center=(512, 284) box=105x103
+  clock          id=3   score=0.57 center=(331, 17) box=89x34
+  banana         id=4   score=0.81 center=(354, 299) box=125x121
+  banana         id=4   score=0.78 center=(189, 43) box=104x78
+  banana         id=4   score=0.78 center=(179, 298) box=138x120
+  banana         id=4   score=0.28 center=(65, 194) box=124x369
+  teddy_site(10) id=10  score=0.91 center=(186, 221) box=100x46
+  teddy_site(10) id=10  score=0.88 center=(485, 208) box=95x46
+  teddy_site(10) id=10  score=0.61 center=(430, 167) box=28x110
+  cake_site(20)  id=20  score=0.77 center=(338, 213) box=105x45
+  clock_site(30) id=30  score=0.87 center=(442, 299) box=37x105
+  clock_site(30) id=30  score=0.53 center=(337, 213) box=106x45
+
+=== AFTER TEMPORAL CLUSTERING + CAKE GATES (what the grasp logic uses) ===
+ordinary conf floor: 0.04 | cake(id2) gate: 0.90 | cake_site(id20) gate: 0.60
+  TARGET CANDIDATE: teddy id=1 at px=(487, 138)
+  TARGET CANDIDATE: teddy id=1 at px=(184, 154)
+  TARGET CANDIDATE: teddy id=1 at px=(468, 31)
+  TARGET CANDIDATE: teddy id=1 at px=(186, 221)
+  TARGET CANDIDATE: teddy id=1 at px=(484, 208)
+  TARGET CANDIDATE: teddy id=1 at px=(430, 166)
+  TARGET CANDIDATE: cake id=2 at px=(337, 213)
+  TARGET CANDIDATE: cake id=2 at px=(341, 160)
+  TARGET CANDIDATE: clock id=3 at px=(513, 284)
+  TARGET CANDIDATE: clock id=3 at px=(443, 299)
+  TARGET CANDIDATE: clock id=3 at px=(331, 17)
+  TARGET CANDIDATE: banana id=4 at px=(354, 299)
+  TARGET CANDIDATE: banana id=4 at px=(179, 298)
+  TARGET CANDIDATE: banana id=4 at px=(189, 43)
+  TARGET CANDIDATE: banana id=4 at px=(66, 193)
+
+[VIEW] saved: /home/spark/logs/latest_view.jpg
+[VIEW] saved: /home/spark/logs/view_20261122_194330.jpg
+
+=== GRASP SCAN-ONLY (assessment, no grasp motion) ===
+[INFO] [1795347811.387434]: >> [VISION] items_config.yaml loaded, item ids: [3, 1, 2, 4]
+[INFO] [1795347811.395349]: >> [CALIB] matrix from /home/spark/transform_3d.dat: 1.05 px/mm at the workspace, round-trip 0.0 mm
+[INFO] [1795347811.397397]: >> [CALIB] fitted 2026-11-22T15:38:34 from 11 pose(s), leave-one-out max 0.7 px / mean 0.5 px
+[INFO] [1795347811.602731]: Setting arm motor status: True
+[INFO] [1795347811.904616]: Setting arm motor status: True
+[CONFIG] depth scale=0.386784 | cake touch z=40.0 mm | floor touch z=-55.0 mm
+[INFO] [1795347816.617223]: >> [VISION] 13 cube(s) from 4 frame(s): [[3, [513, 284, 0]], [1, [488, 138, 0]], [1, [184, 154, 0]], [1, [468, 31, 0]], [1, [186, 221, 0]], [3, [443, 299, 0]], [1, [485, 208, 0]], [4, [354, 299, 0]], [4, [179, 298, 0]], [4, [189, 42, 0]], [2, [337, 213, 0]], [3, [332, 17, 0]], [4, [66, 192, 0]]]
+[SCAN_init] Detections (samples=5, conf>=0.04, cake_conf>=0.90, cake_site_conf>=0.60): [[3, [513, 284, 0]], [1, [488, 138, 0]], [1, [184, 154, 0]], [1, [468, 31, 0]], [1, [186, 221, 0]], [3, [443, 299, 0]], [1, [485, 208, 0]], [4, [354, 299, 0]], [4, [179, 298, 0]], [4, [189, 42, 0]], [2, [337, 213, 0]], [3, [332, 17, 0]], [4, [66, 192, 0]]]
+[TARGET] Cake depth reading hit floor/background (z=-142.3) -> using cake affine
+[DECISION] (Attempt 1/3) 1) Cake IN REACH -> pick immediately without base motion
+[TARGET] mode=cake class=2 xy=(348.0, 13.5) in_reach=True dist=348.3 z_est=None
+[SCAN-ONLY] Assessment complete; no motion command was sent.
+[COMPLETED] result=SCANNED
+=== DONE 19:43:37 ===

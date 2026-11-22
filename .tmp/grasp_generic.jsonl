@@ -1,0 +1,117 @@
+{"ts": "2026-11-21T20:39:39", "result": "OUT_OF_REACH", "case": 2}
+{"ts": "2026-11-21T20:42:25", "result": "PLACED_UNVERIFIED", "case": 1, "target": {"pixel": [340.0, 236.0], "class": 1, "is_cake": false, "xy": [255.0, -6.9], "z_est": -112.5, "mode": "floor"}}
+{"ts": "2026-11-21T20:48:44", "result": "MISS", "case": 2, "target": {"pixel": [353.0, 196.0], "class": 1, "is_cake": false, "xy": [218.6, -5.4], "z_est": -116.2, "mode": "floor"}}
+{"ts": "2026-11-21T20:51:49", "result": "MISS", "case": 2, "target": {"pixel": [301.0, 281.0], "class": 1, "is_cake": false, "xy": [211.4, 29.9], "z_est": -112.7, "mode": "floor"}}
+{"ts": "2026-11-21T21:03:24", "result": "MISS", "case": 2, "target": {"pixel": [299.0, 234.0], "class": 3, "is_cake": false, "xy": [257.5, 29.9], "z_est": -110.4, "mode": "floor"}, "servo_xy": [194.0, 30.5]}
+{"ts": "2026-11-21T21:07:04", "result": "PLACED", "case": 1, "target": {"pixel": [299.0, 234.0], "class": 3, "is_cake": false, "xy": [257.5, 29.9], "z_est": -110.4, "mode": "floor"}, "contact_z": -56.94422162002593}
+{"ts": "2026-11-21T21:14:44", "result": "SCANNED", "case": 2, "target": {"pixel": [411.0, 256.0], "class": 3, "is_cake": false, "xy": [234.8, -68.5], "z_est": -117.8, "mode": "floor"}}
+{"ts": "2026-11-21T21:30:32", "result": "SCANNED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 3, "pixel": [411.0, 256.0], "xy": [234.8, -68.5], "z_est": -117.8}}
+{"ts": "2026-11-21T21:30:51", "result": "PLACED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 3, "pixel": [411.0, 256.0], "xy": [234.8, -68.5], "z_est": -117.8}}
+{"ts": "2026-11-21T21:39:26", "result": "PLACED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 3, "pixel": [412.0, 256.0], "xy": [234.8, -69.4], "z_est": -117.9}}
+{"ts": "2026-11-21T21:41:45", "result": "PLACED", "case": 4, "target": {"mode": "floor", "is_cake": false, "class": 3, "pixel": [325.0, 264.0], "xy": [227.9, 8.0], "z_est": -114.0}}
+{"ts": "2026-11-21T21:47:02", "result": "PLACED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 3, "pixel": [301.0, 304.0], "xy": [189.6, 30.7], "z_est": -113.3}}
+{"ts": "2026-11-21T21:49:07", "result": "OUT_OF_REACH", "case": 4, "target": {"mode": "floor", "is_cake": false, "class": 3, "pixel": [194.0, 59.0], "xy": [494.8, 138.3], "z_est": -134.3}}
+{"ts": "2026-11-21T21:50:15", "result": "PLACED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 3, "pixel": [326.0, 223.0], "xy": [269.5, 4.9], "z_est": -113.6}}
+{"ts": "2026-11-21T21:55:51", "result": "MISS", "case": 4, "target": {"mode": "floor", "is_cake": false, "class": 3, "pixel": [345.0, 234.0], "xy": [257.5, -11.6], "z_est": -113.9}}
+{"ts": "2026-11-21T21:56:42", "result": "PLACED_UNVERIFIED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 3, "pixel": [345.0, 235.0], "xy": [256.2, -11.5], "z_est": -113.4}}
+{"ts": "2026-11-21T22:06:04", "result": "SCANNED", "case": 4, "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [195.0, 90.0], "xy": [457.0, 137.5], "z_est": -142.0}}
+{"ts": "2026-11-21T22:07:40", "result": "SCANNED", "case": 4, "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [195.0, 90.0], "xy": [456.5, 137.4], "z_est": -141.3}}
+{"ts": "2026-11-21T22:07:49", "result": "PLACED_UNVERIFIED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [306.0, 259.0], "xy": [270.7, 23.6], "z_est": -207.1}}
+{"ts": "2026-11-21T22:11:11", "result": "SCANNED", "case": 4, "target": {"mode": "floor", "is_cake": false, "class": 1, "pixel": [547.0, 67.0], "xy": [490.0, -255.5], "z_est": -175.1}}
+{"ts": "2026-11-21T22:18:27", "result": "SCANNED", "case": 2, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [598.0, 47.0], "xy": [478.9, -289.1], "z_est": -134.9}}
+{"ts": "2026-11-21T22:20:27", "result": "NO_TARGET"}
+{"ts": "2026-11-21T22:20:44", "result": "NO_TARGET"}
+{"ts": "2026-11-21T22:21:19", "result": "SCANNED", "case": 4, "target": {"mode": "floor", "is_cake": false, "class": 1, "pixel": [548.0, 68.0], "xy": [487.0, -255.3], "z_est": -173.4}}
+{"ts": "2026-11-21T22:21:33", "result": "MISS", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [320.0, 214.0], "xy": [279.9, 9.8], "z_est": -114.9}}
+{"ts": "2026-11-21T22:25:46", "result": "SCANNED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [314.0, 290.0], "xy": [202.6, 18.9], "z_est": -113.2}}
+{"ts": "2026-11-21T22:29:20", "result": "SCANNED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [316.0, 292.0], "xy": [200.6, 17.2], "z_est": -113.1}}
+{"ts": "2026-11-21T22:29:28", "result": "PLACED_UNVERIFIED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [315.0, 292.0], "xy": [200.6, 18.1], "z_est": -113.0}}
+{"ts": "2026-11-21T22:35:36", "result": "SCANNED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [314.0, 288.0], "xy": [204.3, 18.8], "z_est": -112.5}}
+{"ts": "2026-11-21T22:37:01", "result": "SCANNED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [315.0, 290.0], "xy": [202.6, 18.0], "z_est": -113.2}}
+{"ts": "2026-11-21T22:38:33", "result": "NO_TARGET"}
+{"ts": "2026-11-21T22:39:43", "result": "NO_TARGET"}
+{"ts": "2026-11-21T22:40:00", "result": "NO_TARGET"}
+{"ts": "2026-11-21T22:40:15", "result": "PLACED_UNVERIFIED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [377.0, 260.0], "xy": [232.3, -38.6], "z_est": -119.1}}
+{"ts": "2026-11-21T22:44:07", "result": "PLACED_UNVERIFIED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [376.0, 260.0], "xy": [232.0, -37.6], "z_est": -118.2}}
+{"ts": "2026-11-21T22:45:33", "result": "PLACED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [376.0, 260.0], "xy": [232.6, -37.9], "z_est": -119.8}}
+{"ts": "2026-11-21T22:46:21", "result": "PLACED_UNVERIFIED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [376.0, 258.0], "xy": [234.1, -37.8], "z_est": -118.3}}
+{"ts": "2026-11-21T22:51:35", "result": "SCANNED", "case": 4, "target": {"mode": "floor", "is_cake": false, "class": 1, "pixel": [518.0, 88.0], "xy": [427.1, -198.0], "z_est": -130.7}}
+{"ts": "2026-11-21T22:53:15", "result": "SCANNED", "case": 4, "target": {"mode": "floor", "is_cake": false, "class": 1, "pixel": [518.0, 91.0], "xy": [420.0, -195.4], "z_est": -126.5}}
+{"ts": "2026-11-21T22:53:46", "result": "SCANNED", "case": 4, "target": {"mode": "floor", "is_cake": false, "class": 1, "pixel": [519.0, 90.0], "xy": [424.6, -198.6], "z_est": -130.7}}
+{"ts": "2026-11-21T22:54:28", "result": "NO_TARGET"}
+{"ts": "2026-11-21T22:54:46", "result": "PLACED_UNVERIFIED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 1, "pixel": [274.0, 277.0], "xy": [215.1, 53.4], "z_est": -110.2}}
+{"ts": "2026-11-21T23:03:36", "result": "PLACED_UNVERIFIED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 1, "pixel": [274.0, 277.0], "xy": [215.1, 53.4], "z_est": -110.2}}
+{"ts": "2026-11-21T23:26:08", "result": "PLACED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 1, "pixel": [339.0, 269.0], "xy": [224.2, -4.4], "z_est": -118.3}}
+{"ts": "2026-11-21T23:26:40", "result": "PLACED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 1, "pixel": [340.0, 269.0], "xy": [223.5, -5.1], "z_est": -116.7}}
+{"ts": "2026-11-21T23:30:35", "result": "PLACED_UNVERIFIED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [344.0, 248.0], "xy": [224.0, -5.9], "z_est": -68.3}}
+{"ts": "2026-11-21T23:38:28", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [342.0, 105.0], "xy": [335.2, -9.0], "z_est": -24.6}}
+{"ts": "2026-11-21T23:48:02", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [343.0, 110.0], "xy": [329.6, -9.4], "z_est": -23.9}}
+{"ts": "2026-11-21T23:48:29", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [342.0, 102.0], "xy": [338.1, -9.2], "z_est": -24.5}}
+{"ts": "2026-11-21T23:50:10", "result": "SCANNED", "case": 2, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [346.0, 178.0], "xy": [289.5, -11.7], "z_est": -65.8}}
+{"ts": "2026-11-21T23:51:41", "result": "PLACED_UNVERIFIED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [354.0, 277.0], "xy": [194.3, -11.0], "z_est": -58.3}}
+{"ts": "2026-11-22T00:23:59", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [347.0, 209.0], "xy": [257.7, 6.6], "z_est": null}}
+{"ts": "2026-11-22T00:25:01", "result": "PLACED_UNVERIFIED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [350.0, 159.0], "xy": [297.8, 4.5], "z_est": null}}
+{"ts": "2026-11-22T00:34:12", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [342.0, 150.0], "xy": [305.1, 10.1], "z_est": null}}
+{"ts": "2026-11-22T00:34:33", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [341.0, 197.0], "xy": [267.3, 10.8], "z_est": null}}
+{"ts": "2026-11-22T00:35:31", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [356.0, 246.0], "xy": [228.0, 0.3], "z_est": null}}
+{"ts": "2026-11-22T00:45:29", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [340.0, 213.0], "xy": [282.5, 11.5], "z_est": null}}
+{"ts": "2026-11-22T00:52:36", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [340.0, 196.0], "xy": [296.1, 11.5], "z_est": null}}
+{"ts": "2026-11-22T01:17:19", "result": "NO_TARGET"}
+{"ts": "2026-11-22T01:17:56", "result": "NO_TARGET"}
+{"ts": "2026-11-22T01:25:23", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [347.0, 204.0], "xy": [289.7, 6.6], "z_est": null}}
+{"ts": "2026-11-22T01:26:06", "result": "PLACED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [348.0, 204.0], "xy": [289.7, 5.9], "z_est": null}}
+{"ts": "2026-11-22T01:32:22", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [346.0, 202.0], "xy": [291.3, 7.3], "z_est": null}}
+{"ts": "2026-11-22T01:53:41", "result": "SCANNED", "case": 2, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [409.0, 82.0], "xy": [414.7, -36.5], "z_est": null}}
+{"ts": "2026-11-22T01:55:31", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [343.0, 243.0], "xy": [285.4, 9.4], "z_est": null}}
+{"ts": "2026-11-22T02:09:36", "result": "SCANNED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 1, "pixel": [335.0, 299.0], "xy": [193.9, 1.2], "z_est": -114.2}}
+{"ts": "2026-11-22T02:10:01", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [331.0, 227.0], "xy": [321.2, 17.7], "z_est": null}}
+{"ts": "2026-11-22T02:10:56", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [332.0, 226.0], "xy": [339.0, 17.0], "z_est": null}}
+{"ts": "2026-11-22T02:13:54", "result": "PLACED_UNVERIFIED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [332.0, 211.0], "xy": [348.0, 17.0], "z_est": null}}
+{"ts": "2026-11-22T14:58:07", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:07:42", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:10:20", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:12:01", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:12:33", "result": "PLACED_UNVERIFIED", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 1, "pixel": [334.0, 250.0], "xy": [242.0, -0.9], "z_est": -115.0}}
+{"ts": "2026-11-22T15:13:27", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:24:29", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:29:45", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [342.0, 208.0], "xy": [348.0, 10.1], "z_est": null}}
+{"ts": "2026-11-22T15:30:04", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [342.0, 208.0], "xy": [348.0, 10.1], "z_est": null}}
+{"ts": "2026-11-22T15:34:07", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [341.0, 242.0], "xy": [326.2, 10.8], "z_est": null}}
+{"ts": "2026-11-22T15:34:40", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [342.0, 343.0], "xy": [245.1, 10.1], "z_est": null}}
+{"ts": "2026-11-22T15:38:59", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:41:17", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:42:03", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:52:06", "result": "NO_TARGET"}
+{"ts": "2026-11-22T15:58:16", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [290.0, 190.0], "xy": [348.0, 46.2], "z_est": null}}
+{"ts": "2026-11-22T15:59:23", "result": "NO_TARGET"}
+{"ts": "2026-11-22T16:04:15", "result": "PLACED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [291.0, 188.0], "xy": [348.0, 45.5], "z_est": null}}
+{"ts": "2026-11-22T16:05:06", "result": "MISS", "case": 3, "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [321.0, 248.0], "xy": [258.1, 11.3], "z_est": null}}
+{"ts": "2026-11-22T16:56:45", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [339.0, 210.0], "xy": [348.0, 12.2], "z_est": null}}
+{"ts": "2026-11-22T17:01:04", "result": "SCANNED", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [325.0, 136.0], "xy": [348.0, 21.9], "z_est": null}}
+{"ts": "2026-11-22T17:28:52", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [286.0, 240.0], "xy": [327.8, 49.0], "z_est": null}}
+{"ts": "2026-11-22T17:30:56", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [281.0, 239.0], "xy": [328.6, 52.5], "z_est": null}}
+{"ts": "2026-11-22T17:32:06", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [323.0, 167.0], "xy": [348.0, 23.3], "z_est": null}}
+{"ts": "2026-11-22T18:44:11", "result": "DONE", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [332.0, 164.0], "xy": [348.0, 17.0], "z_est": null}, "plan": {"mode": "cake", "x": 348.0, "y": 17.0, "z_approach": 75.0, "z_touch": 37.0, "z_lift": 80.0, "class_id": 2, "pixel": [332.0, 164.0]}, "hold_seconds": 5.0}
+{"ts": "2026-11-22T18:58:01", "result": "DONE", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [344.0, 350.0], "xy": [239.5, 8.7], "z_est": null}, "plan": {"mode": "cake", "x": 239.5, "y": 8.7, "z_approach": 75.0, "z_touch": 37.0, "z_lift": 80.0, "class_id": 2, "pixel": [344.0, 350.0]}, "hold_seconds": 5.0}
+{"ts": "2026-11-22T18:58:36", "result": "ABORTED", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [345.0, 351.0], "xy": [238.7, 8.0], "z_est": null}, "plan": {"mode": "cake", "x": 238.7, "y": 8.0, "z_approach": 75.0, "z_touch": 37.0, "z_lift": 80.0, "class_id": 2, "pixel": [345.0, 351.0]}, "hold_seconds": 5.0}
+{"ts": "2026-11-22T19:10:55", "result": "SCANNED", "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [346.0, 292.0], "xy": [198.9, -8.4], "z_est": -110.2}, "plan": null, "hold_seconds": 5.0}
+{"ts": "2026-11-22T19:11:12", "result": "DONE", "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [346.0, 294.0], "xy": [197.3, -8.3], "z_est": -110.9}, "plan": {"mode": "floor", "x": 197.3, "y": -8.3, "z_approach": 70.0, "z_touch": -58.0, "z_lift": 60.0, "class_id": 4, "pixel": [346.0, 294.0]}, "hold_seconds": 5.0}
+{"ts": "2026-11-22T19:23:39", "result": "DONE", "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [347.0, 298.0], "xy": [193.6, -9.0], "z_est": -111.3}, "plan": {"mode": "floor", "x": 193.6, "y": -9.0, "z_approach": 70.0, "z_touch": -58.0, "z_lift": 60.0, "class_id": 4, "pixel": [347.0, 298.0]}, "hold_seconds": 5.0}
+{"ts": "2026-11-22T19:24:27", "result": "DONE", "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [352.0, 297.0], "xy": [195.0, -13.4], "z_est": -113.1}, "plan": {"mode": "floor", "x": 195.0, "y": -13.4, "z_approach": 70.0, "z_touch": -58.0, "z_lift": 60.0, "class_id": 4, "pixel": [352.0, 297.0]}, "hold_seconds": 5.0}
+{"ts": "2026-11-22T19:25:08", "result": "SCANNED", "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [354.0, 299.0], "xy": [193.6, -15.2], "z_est": -114.7}, "plan": null, "hold_seconds": 5.0}
+{"ts": "2026-11-22T19:43:31", "result": "SCANNED", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [337.0, 213.0], "xy": [348.0, 13.5], "z_est": null}, "plan": null, "hold_seconds": 5.0}
+{"ts": "2026-11-22T19:44:35", "result": "DONE", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [338.0, 214.0], "xy": [348.0, 12.9], "z_est": null}, "plan": {"mode": "cake", "x": 348.0, "y": 12.9, "z_approach": 75.0, "z_touch": 37.0, "z_lift": 80.0, "class_id": 2, "pixel": [338.0, 214.0]}, "hold_seconds": 5.0}
+{"ts": "2026-11-22T19:48:08", "result": "DONE", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [332.0, 163.0], "xy": [348.0, 17.0], "z_est": null}, "plan": {"mode": "cake", "x": 348.0, "y": 17.0, "z_approach": 75.0, "z_touch": 37.0, "z_lift": 80.0, "class_id": 2, "pixel": [332.0, 163.0]}, "hold_seconds": 5.0}
+{"ts": "2026-11-22T19:49:14", "result": "DONE", "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [353.0, 299.0], "xy": [192.8, -14.1], "z_est": -112.1}, "plan": {"mode": "floor", "x": 192.8, "y": -14.1, "z_approach": 70.0, "z_touch": -58.0, "z_lift": 60.0, "class_id": 4, "pixel": [353.0, 299.0]}, "hold_seconds": 5.0}
+{"ts": "2026-11-22T19:50:11", "result": "DONE", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [201.0, 250.0], "xy": [319.8, 108.1], "z_est": null}, "plan": {"mode": "cake", "x": 319.8, "y": 108.1, "z_approach": 75.0, "z_touch": 37.0, "z_lift": 80.0, "class_id": 2, "pixel": [201.0, 250.0]}, "hold_seconds": 5.0}
+{"ts": "2026-11-22T19:52:06", "result": "NO_TARGET", "target": null, "plan": null, "hold_seconds": 5.0}
+{"ts": "2026-11-22T20:02:59", "result": "SCANNED", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [345.0, 108.0], "xy": [433.8, 8.0], "z_est": null, "far": true}, "plan": null, "hold_seconds": 5.0}
+{"ts": "2026-11-22T20:04:06", "result": "NO_TARGET", "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [85.0, 427.0], "xy": [103.2, 207.3], "z_est": null, "far": false}, "plan": null, "hold_seconds": 5.0}
+{"ts": "2026-11-22T20:09:33", "result": "NO_TARGET", "target": null, "plan": null, "hold_seconds": 5.0}
+{"ts": "2026-11-22T20:10:25", "result": "NO_TARGET", "target": null, "plan": null, "hold_seconds": 5.0}
+{"ts": "2026-11-22T20:11:25", "result": "SCANNED", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [325.0, 111.0], "xy": [431.4, 21.9], "z_est": null, "far": true}, "plan": null, "hold_seconds": 5.0}
+{"ts": "2026-11-22T20:11:41", "result": "DONE", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [365.0, 218.0], "xy": [345.5, -5.9], "z_est": null, "far": false}, "plan": {"mode": "cake", "x": 345.5, "y": -5.9, "z_approach": 75.0, "z_touch": 37.0, "z_lift": 80.0, "class_id": 2, "pixel": [365.0, 218.0]}, "hold_seconds": 5.0}
+{"ts": "2026-11-22T20:12:27", "result": "SCANNED", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [187.0, 112.0], "xy": [430.6, 117.9], "z_est": null, "far": true}, "plan": null, "hold_seconds": 5.0}
+{"ts": "2026-11-22T20:13:29", "result": "SCANNED", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [312.0, 105.0], "xy": [436.2, 30.9], "z_est": null, "far": true}, "plan": null, "hold_seconds": 5.0}
+{"ts": "2026-11-22T20:15:17", "result": "DONE", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [443.0, 238.0], "xy": [329.4, -60.2], "z_est": null, "far": false}, "plan": {"mode": "cake", "x": 329.4, "y": -60.2, "z_approach": 75.0, "z_touch": 37.0, "z_lift": 80.0, "class_id": 2, "pixel": [443.0, 238.0]}, "hold_seconds": 5.0}
+{"ts": "2026-11-22T21:37:11", "result": "NO_TARGET", "target": null, "plan": null, "hold_seconds": 5.0}

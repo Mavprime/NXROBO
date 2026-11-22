@@ -38,6 +38,15 @@ if platform.system() != 'Windows':
 # stricter grasp threshold (match_logic.CONF_THRESHOLD).
 PUBLISH_CONF = 0.25
 
+# Anti-glare gates for the two raw Cake classes; two thresholds because their
+# false-positive profiles differ (measured on the robot, 20 s / 394 boxes):
+#   * id 2  "cake"      : false positives on banana cubes up to 0.852
+#   * id 20 "cake_site" : real cake cube 0.44..0.873, false ones <= 0.527
+# The Cake has FSM priority, so a cheap false positive must never be published.
+# Tunable with ``~cake_conf`` / ``~cake_site_conf`` (values > 1.0 disable).
+CAKE_PUBLISH_CONF = 0.90
+CAKE_SITE_PUBLISH_CONF = 0.60
+
 # Only competition classes are meaningful downstream. items_config.yaml also
 # declares ``base: 99`` and YOLO happily detects the robot's own base at 0.95,
 # which used to fill /objects with an id the FSM ignores anyway.
@@ -91,20 +100,21 @@ class SparkDetect:
                 rospy.logwarn_throttle(5.0, f">> [SPARK-DETECT] bad box from "
                                             f"{label}: {e}")
 
-    def detect(self, image):
-        """Return de-duplicated boxes (dicts) for ``image``; highlights in place."""
+    def detect(self, image, draw=True):
+        """Return de-duplicated boxes (dicts) for ``image``; optionally draws in place."""
         boxes = []
         self._collect(self.model_1, "model_1", image, boxes)
         self._collect(self.model_2, "model_2", image, boxes)
         kept = match_logic.dedupe_boxes(boxes, dist_px=self.dedupe_px)
 
-        for box in kept:
-            cv2.rectangle(image, (box["x1"], box["y1"]), (box["x2"], box["y2"]),
-                          (0, 255, 0), 3)
-            label = f'{box["name"]} {box["score"]:.2f}'
-            cv2.putText(image, label, (box["x1"], box["y1"] - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-            cv2.circle(image, (box["cx"], box["cy"]), 5, (255, 0, 0), -1)
+        if draw:
+            for box in kept:
+                cv2.rectangle(image, (box["x1"], box["y1"]), (box["x2"], box["y2"]),
+                              (0, 255, 0), 3)
+                label = f'{box["name"]} {box["score"]:.2f}'
+                cv2.putText(image, label, (box["x1"], box["y1"] - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                cv2.circle(image, (box["cx"], box["cy"]), 5, (255, 0, 0), -1)
         return kept
 
 
@@ -115,8 +125,16 @@ class Detector:
         self.bridge = CvBridge()
 
         self.publish_conf = float(rospy.get_param("~conf", PUBLISH_CONF))
+        self.cake_publish_conf = float(
+            rospy.get_param("~cake_conf", CAKE_PUBLISH_CONF))
+        self.cake_site_publish_conf = float(
+            rospy.get_param("~cake_site_conf", CAKE_SITE_PUBLISH_CONF))
         augment = bool(rospy.get_param("~augment", False))
         dedupe_px = float(rospy.get_param("~dedupe_px", match_logic.DEDUPE_DIST_PX))
+        rospy.loginfo(f">> [DETECTOR] publish_conf={self.publish_conf:.2f}, "
+                      f"cake_publish_conf={self.cake_publish_conf:.2f}, "
+                      f"cake_site_publish_conf={self.cake_site_publish_conf:.2f} "
+                      f"(anti-glare gates)")
 
         # Load the competition item configuration.
         try:
@@ -163,8 +181,9 @@ class Detector:
         image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
         obj_array.header = data.header
 
+        want_debug = self.image_pub.get_num_connections() > 0
         try:
-            boxes = self.detector.detect(image)
+            boxes = self.detector.detect(image, draw=want_debug)
         except Exception as e:
             rospy.logwarn_throttle(5.0, f">> [DETECTOR] inference exception: {e}")
             boxes = []
@@ -176,7 +195,14 @@ class Detector:
             item_id = int(self.obj_id[box["name"]])
             if item_id not in REPORTED_IDS:
                 continue
-            min_conf = 0.03 if match_logic.is_cake(item_id) else self.publish_conf
+            if item_id == match_logic.CAKE_ID:
+                min_conf = self.cake_publish_conf
+            elif match_logic.is_cake(item_id):
+                # Printed "cake_site" alias (id 20): this is what the detector
+                # actually reports for the Cake cube on the field.
+                min_conf = self.cake_site_publish_conf
+            else:
+                min_conf = self.publish_conf
             if box["score"] < min_conf:
                 continue
             obj = Detection2D()
@@ -199,13 +225,14 @@ class Detector:
             rospy.loginfo(f">> [DETECTOR] frame {self._frame_count}: "
                           f"{published} object(s) published")
 
-        img_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        try:
-            image_out = self.bridge.cv2_to_imgmsg(img_bgr, "bgr8")
-            image_out.header = data.header
-            self.image_pub.publish(image_out)
-        except CvBridgeError as e:
-            rospy.logwarn_throttle(5.0, f">> [DETECTOR] debug image bridge error: {e}")
+        if want_debug:
+            img_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            try:
+                image_out = self.bridge.cv2_to_imgmsg(img_bgr, "bgr8")
+                image_out.header = data.header
+                self.image_pub.publish(image_out)
+            except CvBridgeError as e:
+                rospy.logwarn_throttle(5.0, f">> [DETECTOR] debug image bridge error: {e}")
 
 
 if __name__ == '__main__':

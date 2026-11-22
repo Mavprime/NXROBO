@@ -1,0 +1,4 @@
+[INFO] [1795349446.574674]: >> [CALIB] fitted 2026-11-22T15:38:34 from 11 pose(s), leave-one-out max 0.7 px / mean 0.5 px
+[INFO] [1795349446.782139]: Setting arm motor status: True
+[INFO] [1795349447.084378]: >> [VISUAL-SERVO] Fast base turn: -63.5 deg, duration 1.48s, vel=-0.75 rad/s
+HEADING_RESTORED_63

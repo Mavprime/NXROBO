@@ -1,0 +1,62 @@
+M shape (4, 3)
+[[-1.25643344e-04 -2.36277644e-03  1.03533751e-03]
+ [-2.67561359e-03  8.33411214e-05  2.31626775e-04]
+ [ 2.41902870e-05 -9.94826855e-04 -2.73260337e-03]
+ [ 7.63167598e-02  4.57864009e-01  8.85727923e-01]]
+
+== project floor wrist points (y=0) ==
+x= 150 z=-55 -> u,v = (np.float64(343.6), np.float64(330.3))
+x= 200 z=-55 -> u,v = (np.float64(339.3), np.float64(269.4))
+x= 250 z=-55 -> u,v = (np.float64(335.4), np.float64(213.3))
+x= 290 z=-55 -> u,v = (np.float64(332.5), np.float64(171.6))
+x= 300 z=-55 -> u,v = (np.float64(331.8), np.float64(161.6))
+x= 320 z=-55 -> u,v = (np.float64(330.4), np.float64(142.0))
+x= 350 z=-55 -> u,v = (np.float64(328.5), np.float64(113.6))
+x= 400 z=-55 -> u,v = (np.float64(325.4), np.float64(69.1))
+x= 450 z=-55 -> u,v = (np.float64(322.5), np.float64(27.7))
+x= 500 z=-55 -> u,v = (np.float64(319.8), np.float64(-10.9))
+x= 600 z=-55 -> u,v = (np.float64(314.9), np.float64(-81.0))
+
+== project cake wrist points (y=0, z=40) ==
+x= 200 z=+40 -> u,v = (np.float64(347.2), np.float64(216.3))
+x= 250 z=+40 -> u,v = (np.float64(341.9), np.float64(148.8))
+x= 290 z=+40 -> u,v = (np.float64(338.0), np.float64(99.5))
+x= 320 z=+40 -> u,v = (np.float64(335.3), np.float64(65.0))
+x= 348 z=+40 -> u,v = (np.float64(332.9), np.float64(34.4))
+x= 380 z=+40 -> u,v = (np.float64(330.3), np.float64(1.4))
+x= 400 z=+40 -> u,v = (np.float64(328.8), np.float64(-18.4))
+x= 450 z=+40 -> u,v = (np.float64(325.2), np.float64(-64.8))
+x= 500 z=+40 -> u,v = (np.float64(321.8), np.float64(-107.5))
+x= 600 z=+40 -> u,v = (np.float64(315.9), np.float64(-183.5))
+
+== inverse: pixel_to_xy_at_z at floor z=-100 ==
+v= 60 -> xy=(451.7, 1.4)
+v= 80 -> xy=(425.9, 2.7)
+v=100 -> xy=(400.9, 4.0)
+v=110 -> xy=(388.7, 4.6)
+v=120 -> xy=(376.7, 5.2)
+v=130 -> xy=(364.9, 5.8)
+v=140 -> xy=(353.2, 6.4)
+v=160 -> xy=(330.5, 7.5)
+v=180 -> xy=(308.4, 8.6)
+v=200 -> xy=(287.0, 9.7)
+v=220 -> xy=(266.2, 10.7)
+v=250 -> xy=(236.2, 12.2)
+v=280 -> xy=(207.4, 13.7)
+v=300 -> xy=(188.8, 14.6)
+v=350 -> xy=(144.6, 16.8)
+v=400 -> xy=(103.3, 18.9)
+
+== cake affine (u=320) ==
+v= 60 -> clamped xy=(348.0, 25.4) raw_x=472.3
+v= 80 -> clamped xy=(348.0, 25.4) raw_x=456.3
+v=100 -> clamped xy=(348.0, 25.4) raw_x=440.2
+v=110 -> clamped xy=(348.0, 25.4) raw_x=432.2
+v=120 -> clamped xy=(348.0, 25.4) raw_x=424.2
+v=130 -> clamped xy=(348.0, 25.4) raw_x=416.1
+v=140 -> clamped xy=(348.0, 25.4) raw_x=408.1
+v=160 -> clamped xy=(348.0, 25.4) raw_x=392.0
+v=180 -> clamped xy=(348.0, 25.4) raw_x=376.0
+v=200 -> clamped xy=(348.0, 25.4) raw_x=359.9
+v=220 -> clamped xy=(343.9, 25.4) raw_x=343.9
+v=250 -> clamped xy=(319.8, 25.4) raw_x=319.8

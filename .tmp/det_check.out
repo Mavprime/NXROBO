@@ -1,0 +1,20 @@
+2026年 11月 22日 星期日 21:45:45 CST
+-rw-rw-r-- 1 spark spark 49996 11月 22 21:45 /home/spark/logs/latest_view.jpg
+---DETECTLOG---
+[INFO] [1795355114.015845]: >> [DETECTOR] publish_conf=0.25, cake_publish_conf=0.90, cake_site_publish_conf=0.60 (anti-glare gates)
+[INFO] [1795355114.045895]: >> [DETECTOR] item classes from /home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/config/items_config.yaml: ['bear', 'wine', 'clock', 'bear_site', 'wine_site', 'clock_site', 'base', 'banana', 'banana_site']
+[INFO] [1795355114.046682]: >> [DETECTOR] Initializing models from /home/spark ...
+[INFO] [1795355114.047215]: >> [SPARK-DETECT] Loading model 1: /home/spark/auto.pt
+[INFO] [1795355114.585889]: >> [SPARK-DETECT] Loading model 2: /home/spark/banana.pt
+[INFO] [1795355114.826390]: >> [SPARK-DETECT] Both models loaded (augment=False, dedupe=80px).
+[INFO] [1795355114.827304]: >> [DETECTOR] Neural network models loaded and ready.
+[INFO] [1795355114.829151]: >> [DETECTOR] Subscribed to /camera/color/image_raw
+[INFO] [1795355114.830012]: >> [DETECTOR] Node running, publishing /objects and /debug_image.
+[INFO] [1795355115.204109]: >> [DETECTOR] frame 1: 1 object(s) published
+[INFO] [1795355120.993353]: >> [DETECTOR] frame 51: 0 object(s) published
+[INFO] [1795355126.356101]: >> [DETECTOR] frame 101: 0 object(s) published
+[INFO] [1795355131.914937]: >> [DETECTOR] frame 151: 0 object(s) published
+[INFO] [1795355137.420087]: >> [DETECTOR] frame 201: 1 object(s) published
+[INFO] [1795355142.841563]: >> [DETECTOR] frame 251: 0 object(s) published
+---OBJECTS---
+ERROR: Cannot load message class for [vision_msgs/Detection2DArray]. Are your messages built?

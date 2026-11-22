@@ -35,7 +35,7 @@ while true; do
     pgrep -f "camera_stream.py" >/dev/null && echo "    [✓] Camera Stream :8080:    RUNNING" || echo "    [✗] Stream: STOPPED"
     pgrep -f "detect_ros.py" >/dev/null && echo "    [✓] Neural Network Detector: RUNNING" || echo "    [✗] Detector: STOPPED"
     pgrep -f "runtask.py" >/dev/null && echo "    [✓] Brain runtask:          RUNNING" || echo "    [✗] runtask: STOPPED"
-    rostopic list 2>/dev/null | grep -qx '/move_base/status' && echo "    [✓] Navigation move_base:   RUNNING" || echo "    [✗] Navigation: STOPPED (needs nav_bringup.sh)"
+    rosnode list 2>/dev/null | grep -qx '/move_base' && echo "    [✓] Navigation move_base:   RUNNING" || echo "    [✗] Navigation: STOPPED (needs nav_bringup.sh)"
     pgrep -f "rosbag record" >/dev/null && echo "    [✓] Mission bag recorder:   RUNNING (~/logs/bags)" || echo "    [~] Mission bag recorder:   stopped"
     echo "------------------------------------------------------"
     echo "  1) START ALL SYSTEMS (start_system.sh)"
@@ -49,7 +49,7 @@ while true; do
     echo "  9) MISSION BAGS (~/logs/bags) + STOP RECORDER"
     echo "  0) Exit to bash"
     echo "======================================================"
-    read -p "Select action [0-8]: " choice
+    read -p "Select action [0-9]: " choice
 
     case $choice in
         1)

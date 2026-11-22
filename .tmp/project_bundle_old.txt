@@ -1,0 +1,5044 @@
+﻿
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\codes\arm_move.py ===
+
+#!/usr/bin/env python3
+"""
+Move the uArm end effector to an absolute Cartesian pose.
+
+Prerequisite: arm driver running on the robot:
+    roslaunch swiftpro pro_control_nomoveit.launch
+
+Usage:
+    source ~/spark_noetic/devel/setup.bash
+    python3 ~/codes/arm_move.py --x 200 --y 0 --z 20
+    python3 ~/codes/arm_move.py --home
+    python3 ~/codes/arm_move.py --x 198.8 --y 0.6 --z -50
+
+Coordinates are in the same units as ~/thefile.txt (millimetres).
+Home preset: (120, 0, 35).
+"""
+
+import sys
+
+import rospy
+from swiftpro.msg import position
+
+HOME = (120.0, 0.0, 35.0)
+
+
+def parse_args(argv):
+    args = {"x": None, "y": None, "z": None, "home": False}
+    i = 1
+    while i < len(argv):
+        token = argv[i]
+        if token == "--home":
+            args["home"] = True
+            i += 1
+        elif token in ("--x", "--y", "--z") and i + 1 < len(argv):
+            args[token[2:]] = float(argv[i + 1])
+            i += 2
+        elif ":=" in token or token.startswith("__"):
+            # ROS remapping / private args: leave them for rospy
+            i += 1
+        else:
+            raise SystemExit("unknown argument: %s" % token)
+    if not args["home"] and None in (args["x"], args["y"], args["z"]):
+        raise SystemExit("give --x --y --z, or --home")
+    return args
+
+
+def main():
+    args = parse_args(sys.argv)
+    if args["home"]:
+        x, y, z = HOME
+    else:
+        x, y, z = args["x"], args["y"], args["z"]
+
+    rospy.init_node("arm_move", anonymous=True, argv=[sys.argv[0]])
+    pub = rospy.Publisher("/position_write_topic", position, queue_size=10)
+    rospy.sleep(0.5)  # let the publisher connect
+
+    pose = position()
+    pose.x, pose.y, pose.z = x, y, z
+    print("moving arm to x=%.1f y=%.1f z=%.1f" % (x, y, z))
+    pub.publish(pose)
+    rospy.sleep(0.5)
+
+
+if __name__ == "__main__":
+    main()
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\codes\blue_detect.py ===
+
+#!/usr/bin/env python3
+"""
+Live blue-box detector for the NXROBO Spark robot (ROS Noetic).
+
+Subscribes to /camera/color/image_raw, applies the same HSV mask and
+morphology used by spark_carry_object, and prints the largest contour's
+area and centroid. Use it to check that the camera sees the box before
+moving the arm.
+
+Run on the robot (camera driver must already be running):
+
+    source ~/spark_noetic/devel/setup.bash
+    python3 ~/codes/blue_detect.py
+
+Tune LOWER/UPPER if the box is not detected or other objects are.
+The values below are the patched defaults used for the light-blue cube.
+"""
+
+import time
+
+import cv2
+import numpy as np
+import rospy
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image
+
+LOWER = np.array([90, 50, 50])      # H, S, V
+UPPER = np.array([135, 255, 255])
+MIN_AREA = 300
+PRINT_HZ = 5.0
+
+
+class BlueDetector:
+    def __init__(self):
+        self.bridge = CvBridge()
+        self.kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+        self.last_print = 0.0
+        self.latest = None
+
+    def mask(self, bgr):
+        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+        m = cv2.inRange(hsv, LOWER, UPPER)
+        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, self.kernel)
+        m = cv2.erode(m, None, iterations=4)
+        m = cv2.dilate(m, None, iterations=4)
+        return m
+
+    def callback(self, msg):
+        try:
+            frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+        except Exception as exc:  # CvBridgeError and friends
+            rospy.logwarn("image conversion failed: %s", exc)
+            return
+
+        m = self.mask(frame)
+        contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours = [c for c in contours if cv2.contourArea(c) > MIN_AREA]
+
+        if contours:
+            biggest = max(contours, key=cv2.contourArea)
+            moment = cv2.moments(biggest)
+            if moment["m00"] > 0:
+                cx = moment["m10"] / moment["m00"]
+                cy = moment["m01"] / moment["m00"]
+                self.latest = (cv2.contourArea(biggest), cx, cy)
+            else:
+                self.latest = None
+        else:
+            self.latest = None
+
+        now = time.time()
+        if now - self.last_print >= 1.0 / PRINT_HZ:
+            self.last_print = now
+            if self.latest:
+                area, cx, cy = self.latest
+                print("BLUE area=%4d center=(%3d,%3d)" % (area, cx, cy))
+            else:
+                print("no blue box")
+
+    def run(self):
+        rospy.init_node("blue_detect", anonymous=True)
+        rospy.Subscriber("/camera/color/image_raw", Image, self.callback, queue_size=1)
+        rospy.loginfo("blue_detect ready; waiting for /camera/color/image_raw")
+        rospy.spin()
+
+
+if __name__ == "__main__":
+    BlueDetector().run()
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\codes\blue_snap.py ===
+
+#!/usr/bin/env python3
+"""
+Save one camera frame plus its blue mask.
+
+Useful when the detector reports "no blue box": copy the two PNG files to
+your PC and look at them.
+
+Run on the robot:
+
+    source ~/spark_noetic/devel/setup.bash
+    python3 ~/codes/blue_snap.py
+
+Then from your PC:
+
+    scp spark@10.25.141.8:/tmp/blue.png spark@10.25.141.8:/tmp/blue_mask.png .
+
+Optional arguments:
+    python3 blue_snap.py /tmp/my.png /tmp/my_mask.png
+"""
+
+import sys
+
+import cv2
+import numpy as np
+import rospy
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image
+
+LOWER = np.array([90, 50, 50])
+UPPER = np.array([135, 255, 255])
+
+IMAGE_PATH = sys.argv[1] if len(sys.argv) > 1 else "/tmp/blue.png"
+MASK_PATH = sys.argv[2] if len(sys.argv) > 2 else "/tmp/blue_mask.png"
+
+
+def main():
+    rospy.init_node("blue_snap", anonymous=True, argv=[sys.argv[0]])
+    msg = rospy.wait_for_message("/camera/color/image_raw", Image, timeout=5.0)
+    frame = CvBridge().imgmsg_to_cv2(msg, "bgr8")
+
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, LOWER, UPPER)
+
+    cv2.imwrite(IMAGE_PATH, frame)
+    cv2.imwrite(MASK_PATH, mask)
+    print("saved %s and %s" % (IMAGE_PATH, MASK_PATH))
+    print("blue pixels: %d" % int(mask.sum() / 255))
+
+
+if __name__ == "__main__":
+    main()
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\codes\detect_pipeline_debug.py ===
+
+#!/usr/bin/env python3
+"""
+Replay the grasp node's detection pipeline frame by frame.
+
+Prints, for each frame: number of contours, largest area, centroid and how
+many consecutive frames satisfied the stability test. Use this when the
+grasp demo keeps printing "not found".
+
+Run on the robot:
+
+    source ~/spark_noetic/devel/setup.bash
+    python3 ~/codes/detect_pipeline_debug.py
+
+The grasp demo (s_carry_object_cv3.py) was patched to require 10 stable
+frames within 6 px. Original values were 20 frames / 2 px.
+"""
+
+import cv2
+import numpy as np
+import rospy
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image
+
+LOWER = np.array([90, 50, 50])
+UPPER = np.array([135, 255, 255])
+FRAMES = 20
+STABLE_PX = 6.0
+
+
+def pipeline(frame, kernel):
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, LOWER, UPPER)
+    masked_hsv = cv2.bitwise_and(hsv, hsv, mask=mask)
+    hue = masked_hsv[:, :, 0]
+    blurred = cv2.blur(hue, (9, 9))
+    _, thresh = cv2.threshold(blurred, 90, 255, cv2.THRESH_BINARY)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    thresh = cv2.erode(thresh, None, iterations=4)
+    thresh = cv2.dilate(thresh, None, iterations=4)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    return contours
+
+
+def main():
+    rospy.init_node("detect_pipeline_debug", anonymous=True)
+    bridge = CvBridge()
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+    frames = []
+
+    def callback(msg):
+        frames.append(bridge.imgmsg_to_cv2(msg, "bgr8"))
+
+    subscriber = rospy.Subscriber("/camera/color/image_raw", Image, callback, queue_size=30)
+    rospy.sleep(1.0)
+    subscriber.unregister()
+
+    print("captured %d frames" % len(frames))
+    previous = None
+    stable = 0
+    for index, frame in enumerate(frames[-FRAMES:]):
+        contours = pipeline(frame, kernel)
+        if not contours:
+            print("%2d no contours" % index)
+            previous = None
+            stable = 0
+            continue
+        biggest = max(contours, key=cv2.contourArea)
+        moment = cv2.moments(biggest)
+        if moment["m00"] == 0:
+            continue
+        cx = moment["m10"] / moment["m00"]
+        cy = moment["m01"] / moment["m00"]
+        if previous is not None and abs(cx - previous[0]) <= STABLE_PX and abs(cy - previous[1]) <= STABLE_PX:
+            stable += 1
+        else:
+            stable = 0
+        print("%2d n=%d area=%d centroid=(%.1f,%.1f) stable=%d"
+              % (index, len(contours), cv2.contourArea(biggest), cx, cy, stable))
+        previous = (cx, cy)
+
+
+if __name__ == "__main__":
+    main()
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\codes\Spark_Commands.html ===
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Spark Robot - Setup, Commands and Scripts</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11pt; line-height: 1.35; }
+  h1 { font-size: 20pt; }
+  h2 { font-size: 15pt; border-bottom: 1px solid #999; padding-bottom: 2px; }
+  h3 { font-size: 12pt; }
+  pre { font-family: "Courier New"; font-size: 9pt; background: #f2f2f2; border: 1px solid #cccccc; padding: 6px; }
+  code { font-family: "Courier New"; font-size: 9.5pt; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #999999; padding: 4px; vertical-align: top; }
+  th { background: #e6e6e6; text-align: left; }
+  .note { background: #fff4d6; border-left: 4px solid #e0a800; padding: 6px; }
+  .warn { background: #ffe6e6; border-left: 4px solid #c00000; padding: 6px; }
+</style>
+</head>
+<body>
+
+<h1>Spark Robot &mdash; Setup, Commands and Scripts</h1>
+<p><strong>Prepared:</strong> 2026-11-13 &nbsp;|&nbsp; <strong>Robot:</strong> Spark-H (NXROBO) &nbsp;|&nbsp; <strong>OS:</strong> Ubuntu 20.04.5 LTS &nbsp;|&nbsp; <strong>ROS:</strong> Noetic</p>
+
+<h2>1. Quick facts</h2>
+<table width="100%" border="1" cellspacing="0" cellpadding="4">
+<tr><th width="30%">Item</th><th width="70%">Value</th></tr>
+<tr><td>Robot IP (current)</td><td><code>10.25.141.8</code></td></tr>
+<tr><td>SSH login</td><td>user <code>spark</code>, password <code>spark</code></td></tr>
+<tr><td>Robot workspace</td><td><code>/home/spark/spark_noetic</code></td></tr>
+<tr><td>HarmonyOS workspace</td><td><code>/home/spark/UBUNTU20_0</code></td></tr>
+<tr><td>Hand-eye calibration file</td><td><code>/home/spark/thefile.txt</code></td></tr>
+<tr><td>Robot serial ports</td><td><code>/dev/sparkBase</code> (base), <code>/dev/SPARK-HM-PI</code> (star board)</td></tr>
+<tr><td>Star-board WiFi config</td><td><code>/home/spark/wifi_info.txt</code></td></tr>
+<tr><td>Star-board IP (configured)</td><td><code>192.168.124.121</code>, SSID <code>OpenHarmony_2</code>, gateway <code>192.168.124.1</code></td></tr>
+</table>
+
+<h2>2. Connecting to the robot</h2>
+<h3>2.1 SSH (Linux / macOS / Windows 10+)</h3>
+<pre>ssh spark@10.25.141.8
+# password: spark</pre>
+
+<h3>2.2 Windows GUI client - MobaXterm</h3>
+<p>MobaXterm is Windows-only. Install it from
+<code>M-Robots 半自动赛资料/Tools/MobaXterm_Installer_v26.6.zip</code> (run the MSI with the DAT file in the same folder).
+Create a new SSH session:</p>
+<table width="100%" border="1" cellspacing="0" cellpadding="4">
+<tr><th width="30%">Field</th><th width="70%">Value</th></tr>
+<tr><td>Remote host</td><td>10.25.141.8</td></tr>
+<tr><td>Port</td><td>22</td></tr>
+<tr><td>Username</td><td>spark</td></tr>
+<tr><td>Password</td><td>spark</td></tr>
+</table>
+<p>On Ubuntu, use the terminal <code>ssh</code> command or Remmina (SSH/SFTP/VNC).</p>
+
+<h3>2.3 If the IP changed</h3>
+<p>The robot gets its address over DHCP; it can change after a reconnect. On the robot:</p>
+<pre>hostname -I
+ip -br addr show wlo1</pre>
+<p>Or press the robot's AP/network button once - Spark announces its current IP.</p>
+
+<h3>2.4 GUI programs over SSH (RViz, OpenCV windows)</h3>
+<p>SSH sessions have no display by default. Before launching anything graphical:</p>
+<pre>export DISPLAY=:0
+export XAUTHORITY=$HOME/.Xauthority</pre>
+<p>Windows then appear on the robot's own screen. For X forwarding from your PC, connect with <code>ssh -X spark@10.25.141.8</code>.</p>
+
+<h2>3. ROS environment</h2>
+<h3>3.1 Standard workspace</h3>
+<pre>cd ~/spark_noetic
+source devel/setup.bash</pre>
+
+<h3>3.2 HarmonyOS workspace (Spark-H match code)</h3>
+<p>The HM packages live in <code>~/UBUNTU20_0/src/3rd_app</code>, but that workspace's
+<code>devel/.catkin</code> still points at <code>~/spark_noetic/src</code>, so they are not
+registered by default. Add the source tree explicitly:</p>
+<pre>source ~/spark_noetic/devel/setup.bash
+source ~/UBUNTU20_0/devel/setup.bash
+export ROS_PACKAGE_PATH=$HOME/UBUNTU20_0/src:$ROS_PACKAGE_PATH
+
+rospack find spark_hm_pi
+rospack find spark_hm_task_match</pre>
+<p><strong>Note:</strong> Permanent fix (optional): <code>cd ~/UBUNTU20_0 &amp;&amp; catkin_make</code>. This rebuilds the workspace and rewrites <code>.catkin</code>; it can take several minutes.</p>
+
+<h3>3.3 Useful ROS checks</h3>
+<pre>rosnode list
+rostopic list
+rostopic hz /camera/color/image_raw
+pgrep -af "roslaunch|rosmaster"</pre>
+
+<h2>4. Starting the camera and the arm</h2>
+<h3>4.1 Camera + base + lidar</h3>
+<pre>cd ~/spark_noetic
+source devel/setup.bash
+roslaunch spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6</pre>
+<p>Verify the stream in another terminal:</p>
+<pre>rostopic hz /camera/color/image_raw    # expect about 30 Hz</pre>
+<p>Live view (on the robot screen):</p>
+<pre>export DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority
+rosrun image_view image_view image:=/camera/color/image_raw</pre>
+
+<h3>4.2 Arm driver (uArm)</h3>
+<pre>cd ~/spark_noetic
+source devel/setup.bash
+roslaunch swiftpro pro_control_nomoveit.launch</pre>
+<p>Check that the arm is detected first:</p>
+<pre>lsusb | grep -E '2341:0042|2e88:4603'
+# 2341:0042 = uArm, 2e88:4603 = Sagittarius</pre>
+<p><strong>Warning:</strong> If the arm is not in <code>lsusb</code>, power on the arm and check its USB cable to the expansion dock. Calibration and motion commands do nothing without it.</p>
+
+<h2>5. Hand-eye calibration (arm + camera)</h2>
+<h3>5.1 Prerequisites</h3>
+<ul>
+<li>Camera mounted upside-down, looking down.</li>
+<li>Red calibration block attached directly above the suction-cup mount.</li>
+<li>Arm powered; e-stop released.</li>
+<li>Display environment exported (section 2.4).</li>
+</ul>
+
+<h3>5.2 Run</h3>
+<pre>export DISPLAY=:0
+export XAUTHORITY=$HOME/.Xauthority
+cd ~/spark_noetic
+./onekey.sh        # 8 (arm-camera calibration) -> 2 (uArm) -> Enter</pre>
+<p>Two OpenCV windows open (the main one is titled <code>win_draw</code>). Rotate the D435 so the
+<strong>red block lies inside the green rectangle</strong>, then press any key in the helper
+terminal (or publish the start message manually):</p>
+<pre>rostopic pub /start_topic std_msgs/String "data: 'start'" -1</pre>
+<p>The arm moves through 20 poses. At 20/20 it writes <code>~/thefile.txt</code> and prints two
+regression lines. Press <code>Ctrl+C</code> in the launching terminal to stop.</p>
+
+<h3>5.3 Calibration file format</h3>
+<pre>k1 b1 k2 b2
+x = k1 * yc + b1
+y = k2 * xc + b2</pre>
+<p><code>xc, yc</code> = blue/red object centroid in pixels; <code>x, y</code> = arm coordinates in mm.</p>
+<p>Current values (2026-11-13 21:30):</p>
+<pre>-0.7762224121275175 439.40871851081226 -0.4913502764702656 204.47386347140525</pre>
+
+<h2>6. Moving the arm manually</h2>
+<p>Topic: <code>/position_write_topic</code>, type <code>swiftpro/position</code> (<code>float64 x, y, z</code>).</p>
+<pre># hover 20 mm above a point
+rostopic pub -1 /position_write_topic swiftpro/position "{x: 198.8, y: 0.6, z: 20.0}"
+
+# lower onto the object (touch / pick height)
+rostopic pub -1 /position_write_topic swiftpro/position "{x: 198.8, y: 0.6, z: -50.0}"
+
+# home
+rostopic pub -1 /position_write_topic swiftpro/position "{x: 120.0, y: 0.0, z: 35.0}"</pre>
+<p>Or use the helper script (section 8):</p>
+<pre>python3 ~/codes/arm_move.py --x 198.8 --y 0.6 --z 20
+python3 ~/codes/arm_move.py --home</pre>
+<p><strong>Note:</strong> The arm moves directly to the pose. Keep hands clear. If it stops short, use z = -60; if it presses too hard, use z = -40.</p>
+
+<h2>7. Blue-box detection</h2>
+<h3>7.1 HSV thresholds</h3>
+<p>The grasp demo originally used <code>H 100-130, S &gt;= 90, V &gt;= 80</code>. The light-blue cube in
+the lab has mean <code>H 86, S 75, V 142</code>, which fragmented under that filter. The detector
+was patched to:</p>
+<pre>LowerBlue = np.array([90, 50, 50])
+UpperBlue = np.array([135, 255, 255])</pre>
+<p>Original file backed up as
+<code>~/spark_noetic/src/spark_app/spark_carry/nodes/s_carry_object_cv3.py.bak_20261113</code>.</p>
+
+<h3>7.2 Stability check patch</h3>
+<p>The demo required the centroid to move no more than 2 px for 20 consecutive frames, which
+never happened with the real camera (1-4 px jitter per frame). Patched to:</p>
+<pre>if found_count &gt;= 10:
+if abs(xc - xc_prev) &lt;= 6 and abs(yc - yc_prev) &lt;= 6:</pre>
+
+<h3>7.3 Live detector</h3>
+<pre>source ~/spark_noetic/devel/setup.bash
+python3 ~/codes/blue_detect.py</pre>
+<p>Example output:</p>
+<pre>BLUE area=14793 center=(415,310)
+BLUE area=15266 center=(415,312)</pre>
+
+<h3>7.4 Snapshot for debugging</h3>
+<pre>python3 ~/codes/blue_snap.py /tmp/blue.png /tmp/blue_mask.png
+# from your PC:
+scp spark@10.25.141.8:/tmp/blue.png spark@10.25.141.8:/tmp/blue_mask.png .</pre>
+
+<h3>7.5 Detect and touch</h3>
+<p>Detects the box, converts the pixel centre through <code>thefile.txt</code>, moves to
+<code>z=20</code>, then <code>z=-50</code>, then home.</p>
+<pre>python3 ~/codes/touch_blue.py
+python3 ~/codes/touch_blue.py --dry-run   # print coordinates, do not move</pre>
+
+<h3>7.6 Detection-pipeline debug</h3>
+<pre>python3 ~/codes/detect_pipeline_debug.py</pre>
+<p>Prints per-frame contour area, centroid and stability count. Use it when the grasp demo
+keeps printing <code>not found</code>.</p>
+
+<h2>8. Grasp demo (visual pick)</h2>
+<h3>8.1 Start via one-key menu</h3>
+<pre>cd ~/spark_noetic
+./onekey.sh        # 9 -> 2 (uArm) -> 1 (fixed position) -> Enter</pre>
+<p>Put a blue object in front of the robot. The launch opens RViz and a helper terminal.
+Press any key in the helper to start, which calls:</p>
+<pre>rosservice call /s_carry_object "type: 1"</pre>
+
+<h3>8.2 Start directly (survives SSH drops)</h3>
+<pre>cd ~/spark_noetic
+source devel/setup.bash
+export DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority
+setsid nohup roslaunch spark_carry_object spark_carry_object_only_cv3.launch \
+  camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6 &gt; ~/grasp.log 2&gt;&amp;1 &lt; /dev/null &amp;
+
+# trigger the grasp
+rosservice call /s_carry_object "type: 1"</pre>
+
+<h3>8.3 Expected state machine</h3>
+<pre>GRASP_OBJECT -> NAV_TO_WAYPOINT -> RELEASE_OBJECT</pre>
+<p>To stop the demo:</p>
+<pre>pkill -INT -f "roslaunch spark_carry_object spark_carry_object_only_cv3"</pre>
+
+<h2>9. HarmonyOS competition / star board (Spark-H)</h2>
+<h3>9.1 Driver commands</h3>
+<pre>source ~/spark_noetic/devel/setup.bash
+source ~/UBUNTU20_0/devel/setup.bash
+export ROS_PACKAGE_PATH=$HOME/UBUNTU20_0/src:$ROS_PACKAGE_PATH
+
+# manual match:  roslaunch spark_hm_pi_manual hm_spark.launch
+# task match:    roslaunch spark_hm_pi hm_spark.launch</pre>
+<p>For the full task program, <code>roslaunch spark_hm_task_match run.launch</code> already
+includes <code>hm_spark.launch</code> - do not start it twice. The task starts when
+<code>hm_task_match_start</code> (String) is published.</p>
+
+<h3>9.2 Star board (星火派) connection</h3>
+<ul>
+<li>Serial device: <code>/dev/SPARK-HM-PI</code> (115200 baud); base: <code>/dev/sparkBase</code>.</li>
+<li>Network config: <code>/home/spark/wifi_info.txt</code> is sent to the board over serial when the driver runs.</li>
+<li>Current config: SSID <code>OpenHarmony_2</code>, board IP <code>192.168.124.121</code>, gateway <code>192.168.124.1</code>.</li>
+<li>Press <strong>Reset</strong> on the board after starting the driver. Dot-matrix display: yellow cross = waiting for network, red check = connected.</li>
+<li>The phone must be on the same network; in the app enter <code>192.168.124.121</code> and the app's port.</li>
+</ul>
+<p><strong>Note:</strong> The HarmonyOS phone app is not included in the documentation pack. The project is a DevEco Studio application (bundle <code>com.example.carcontrol1</code>); ask the organizer for the "鸿蒙比赛APP" project or a signed HAP. The app project contains pages <code>tcpTest</code>, <code>autoPage</code>, <code>index</code> and <code>autoMatch</code>.</p>
+
+<h2>10. Troubleshooting</h2>
+<table width="100%" border="1" cellspacing="0" cellpadding="4">
+<tr><th width="26%">Symptom</th><th width="24%">Cause</th><th width="50%">Fix</th></tr>
+<tr><td>No OpenCV/RViz windows</td><td>DISPLAY not set in the SSH shell</td><td><code>export DISPLAY=:0; export XAUTHORITY=$HOME/.Xauthority</code> before launching</td></tr>
+<tr><td>[错误] 机械臂没有正确连接或未上电</td><td>Arm off / USB unplugged</td><td>Power arm, reseat USB to dock, check <code>lsusb</code> for <code>2341:0042</code></td></tr>
+<tr><td>map_server could not open test_map.yaml</td><td>No map built</td><td>Ignore for fixed-position grasp; build a map (onekey option 4) before navigation</td></tr>
+<tr><td>Grasp prints "not found" forever</td><td>Colour threshold or unstable centroid</td><td>Use patched HSV values; run <code>detect_pipeline_debug.py</code></td></tr>
+<tr><td>ERROR: Unable to communicate with master</td><td>No ROS master</td><td>Start the driver/launch first; roslaunch starts the master</td></tr>
+<tr><td>SSH freezes / robot unreachable</td><td>Wi-Fi dropped or IP changed</td><td>Wait/reconnect; get new IP with <code>hostname -I</code>; prefer a dedicated hotspot</td></tr>
+<tr><td>Star board unreachable</td><td>Robot and board on different networks</td><td>Match <code>wifi_info.txt</code> to the real hotspot (SSID/IP/gateway)</td></tr>
+<tr><td>Joint1 not found in URDF warning</td><td>URDF naming mismatch</td><td>Benign; ignore</td></tr>
+<tr><td><code>rostopic pub</code> takes 3 s</td><td>Normal: <code>-1</code> waits before exiting</td><td>No action</td></tr>
+</table>
+
+<h2>11. Scripts folder</h2>
+<p>Files in this folder:</p>
+<table width="100%" border="1" cellspacing="0" cellpadding="4">
+<tr><th width="32%">File</th><th width="68%">Purpose</th></tr>
+<tr><td><code>blue_detect.py</code></td><td>Live blue-box detection; prints area and centroid</td></tr>
+<tr><td><code>blue_snap.py</code></td><td>Save one frame and its blue mask to PNG</td></tr>
+<tr><td><code>touch_blue.py</code></td><td>Detect the box, convert through the calibration, touch it, go home</td></tr>
+<tr><td><code>arm_move.py</code></td><td>Move the arm to an absolute x/y/z pose or home</td></tr>
+<tr><td><code>detect_pipeline_debug.py</code></td><td>Frame-by-frame debug of the grasp detector</td></tr>
+</table>
+
+<h3>11.1 Copy the scripts to the robot</h3>
+<pre>scp -r "/home/mav/Documents/Extra/ROS Comp/codes" spark@10.25.141.8:/home/spark/codes
+ssh spark@10.25.141.8 "chmod +x /home/spark/codes/*.py"</pre>
+
+<h3>11.2 Run them</h3>
+<pre>ssh spark@10.25.141.8
+source ~/spark_noetic/devel/setup.bash
+python3 ~/codes/blue_detect.py</pre>
+<p>All scripts assume the camera driver (<code>spark_bringup</code>) is running. The touch and
+move scripts also need the arm driver (<code>swiftpro</code>).</p>
+
+<h2>12. Changes made on the robot (2026-11-13)</h2>
+<ul>
+<li>Recalibrated arm + camera; wrote new parameters to <code>~/thefile.txt</code> at 21:30.</li>
+<li>Patched <code>s_carry_object_cv3.py</code>:
+  <ul>
+  <li>blue HSV thresholds: <code>[100,90,80]/[130,255,255]</code> &rarr; <code>[90,50,50]/[135,255,255]</code></li>
+  <li>stability: 20 frames / 2 px &rarr; 10 frames / 6 px</li>
+  <li>backup: <code>s_carry_object_cv3.py.bak_20261113</code></li>
+  </ul>
+</li>
+<li>No changes to <code>wifi_info.txt</code>, the HarmonyOS workspaces or system configuration.</li>
+</ul>
+
+<h2>13. Safety</h2>
+<ul>
+<li>The arm moves immediately when a pose is published; keep hands, cables and the field clear.</li>
+<li>Keep the emergency stop within reach; it must be released for the base/arm to move.</li>
+<li>Charge the robot before long runs; a low battery can shut the NUC down mid-run and drop the SSH session.</li>
+<li>Do not run two launches that both start the camera or the arm (duplicate drivers cause conflicts).</li>
+<li>The competition programs must not be modified beyond the allowed software scope; keep the backups above.</li>
+</ul>
+
+</body>
+</html>
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\codes\touch_blue.py ===
+
+#!/usr/bin/env python3
+"""
+Detect the blue box and move the uArm suction cup to touch its top centre.
+
+Pipeline:
+  camera frame -> HSV blue mask -> largest contour centroid (xc, yc)
+  -> pixel-to-arm mapping from ~/thefile.txt
+  -> publish two poses on /position_write_topic (hover, then touch)
+  -> return home.
+
+Prerequisites on the robot:
+  - camera driver running:
+        roslaunch spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6
+  - arm driver running:
+        roslaunch swiftpro pro_control_nomoveit.launch
+  - ~/thefile.txt exists (run ./onekey.sh -> 8 -> 2)
+
+Run:
+    source ~/spark_noetic/devel/setup.bash
+    python3 ~/codes/touch_blue.py            # move and touch
+    python3 ~/codes/touch_blue.py --dry-run  # print coordinates only
+
+The box must be inside the arm's reach. Keep hands clear; the arm moves
+directly to the computed point.
+"""
+
+import sys
+
+import cv2
+import numpy as np
+import rospy
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image
+from swiftpro.msg import position
+
+CALIBRATION_FILE = "/home/spark/thefile.txt"
+
+LOWER = np.array([90, 50, 50])
+UPPER = np.array([135, 255, 255])
+MIN_AREA = 300
+FRAMES = 10          # frames averaged before moving
+
+HOVER_Z = 20.0       # above the box
+TOUCH_Z = -50.0      # down onto the box (try -40 / -60 if needed)
+HOME_X, HOME_Y, HOME_Z = 120.0, 0.0, 35.0
+
+DRY_RUN = "--dry-run" in sys.argv
+ROS_ARGV = [arg for arg in sys.argv if arg != "--dry-run"]
+
+
+def read_calibration(path):
+    """Return (a1, b1, a3, b3): x = a1*yc + b1, y = a3*xc + b3."""
+    with open(path) as handle:
+        values = [float(v) for v in handle.read().split()]
+    if len(values) < 4:
+        raise RuntimeError("calibration file needs 4 values: %s" % path)
+    return values[0], values[1], values[2], values[3]
+
+
+def detect(frame, kernel):
+    mask = cv2.inRange(cv2.cvtColor(frame, cv2.COLOR_BGR2HSV), LOWER, UPPER)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    mask = cv2.dilate(cv2.erode(mask, None, iterations=4), None, iterations=4)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours = [c for c in contours if cv2.contourArea(c) > MIN_AREA]
+    if not contours:
+        return None
+    biggest = max(contours, key=cv2.contourArea)
+    moment = cv2.moments(biggest)
+    if moment["m00"] == 0:
+        return None
+    return moment["m10"] / moment["m00"], moment["m01"] / moment["m00"]
+
+
+def main():
+    a1, b1, a3, b3 = read_calibration(CALIBRATION_FILE)
+    print("calibration: x=%.5f*yc+%.2f  y=%.5f*xc+%.2f" % (a1, b1, a3, b3))
+
+    rospy.init_node("touch_blue", anonymous=True, argv=ROS_ARGV)
+    pub = rospy.Publisher("/position_write_topic", position, queue_size=10)
+    bridge = CvBridge()
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+
+    xs, ys = [], []
+    for _ in range(FRAMES):
+        msg = rospy.wait_for_message("/camera/color/image_raw", Image, timeout=5.0)
+        result = detect(bridge.imgmsg_to_cv2(msg, "bgr8"), kernel)
+        if result:
+            xs.append(result[0])
+            ys.append(result[1])
+
+    if not xs:
+        print("no blue box")
+        return 1
+
+    xc = sum(xs) / len(xs)
+    yc = sum(ys) / len(ys)
+    arm_x = a1 * yc + b1
+    arm_y = a3 * xc + b3
+    print("pixel=(%.0f,%.0f)  arm=(%.1f,%.1f)" % (xc, yc, arm_x, arm_y))
+
+    if DRY_RUN:
+        print("dry run: not moving")
+        return 0
+
+    pose = position()
+    pose.x, pose.y = arm_x, arm_y
+
+    pose.z = HOVER_Z
+    pub.publish(pose)
+    rospy.sleep(1.5)
+
+    pose.z = TOUCH_Z
+    pub.publish(pose)
+    rospy.sleep(2.0)
+    print("touched - going home")
+
+    pose.x, pose.y, pose.z = HOME_X, HOME_Y, HOME_Z
+    pub.publish(pose)
+    rospy.sleep(2.0)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\README.txt ===
+
+1. Tools：该目录存放一些常用的工具安装包
+	hdc.exe / libusb_shared.dll 这是与Spark机器人的主控板进行有线连接的工具，通过Type-C数据线连接Spark机器人与PC，即可借助此工具查询机器人当前Wlan0的IP地址
+	MobaXterm_Installer_v26.6是与Spark机器人进行远程连接并控制的工具，需用户自行解压并安装到PC上
+	VNC_Viewer_v7.8.0.exe 该工具用于获取Spark机器人创建虚拟终端屏幕，方便用户通过该工具查看RVIZ画面并调试设备，需用户自行安装到PC上
+	
+2. 比赛程序：该目录存放了M-Robots半自动比赛相关的板端的比赛程序
+
+3. 说明文档：该目录存放了Spark-HM机器人以及半自动比赛程序的说明文档
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\lib\python3.12\site-packages\semi_auto_match_24\__init__.py ===
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\lib\python3.12\site-packages\semi_auto_match_24\msg\_LocationCentre.py ===
+
+# This Python file uses the following encoding: utf-8
+"""autogenerated by genpy from semi_auto_match_24/LocationCentre.msg. Do not edit."""
+import codecs
+import sys
+python3 = True if sys.hexversion > 0x03000000 else False
+import genpy
+import struct
+
+
+class LocationCentre(genpy.Message):
+  _md5sum = "bf0e72df5b9043a16291d7a51ba75922"
+  _type = "semi_auto_match_24/LocationCentre"
+  _has_header = False  # flag to mark the presence of a Header object
+  _full_text = """int64 obj_id
+float64 loc_centre_x
+float64 loc_centre_y
+"""
+  __slots__ = ['obj_id','loc_centre_x','loc_centre_y']
+  _slot_types = ['int64','float64','float64']
+
+  def __init__(self, *args, **kwds):
+    """
+    Constructor. Any message fields that are implicitly/explicitly
+    set to None will be assigned a default value. The recommend
+    use is keyword arguments as this is more robust to future message
+    changes.  You cannot mix in-order arguments and keyword arguments.
+
+    The available fields are:
+       obj_id,loc_centre_x,loc_centre_y
+
+    :param args: complete set of field values, in .msg order
+    :param kwds: use keyword arguments corresponding to message field names
+    to set specific fields.
+    """
+    if args or kwds:
+      super(LocationCentre, self).__init__(*args, **kwds)
+      # message fields cannot be None, assign default values for those that are
+      if self.obj_id is None:
+        self.obj_id = 0
+      if self.loc_centre_x is None:
+        self.loc_centre_x = 0.
+      if self.loc_centre_y is None:
+        self.loc_centre_y = 0.
+    else:
+      self.obj_id = 0
+      self.loc_centre_x = 0.
+      self.loc_centre_y = 0.
+
+  def _get_types(self):
+    """
+    internal API method
+    """
+    return self._slot_types
+
+  def serialize(self, buff):
+    """
+    serialize message into buffer
+    :param buff: buffer, ``StringIO``
+    """
+    try:
+      _x = self
+      buff.write(_get_struct_q2d().pack(_x.obj_id, _x.loc_centre_x, _x.loc_centre_y))
+    except struct.error as se: self._check_types(struct.error("%s: '%s' when writing '%s'" % (type(se), str(se), str(locals().get('_x', self)))))
+    except TypeError as te: self._check_types(ValueError("%s: '%s' when writing '%s'" % (type(te), str(te), str(locals().get('_x', self)))))
+
+  def deserialize(self, str):
+    """
+    unpack serialized message in str into this message instance
+    :param str: byte array of serialized message, ``str``
+    """
+    if python3:
+      codecs.lookup_error("rosmsg").msg_type = self._type
+    try:
+      end = 0
+      _x = self
+      start = end
+      end += 24
+      (_x.obj_id, _x.loc_centre_x, _x.loc_centre_y,) = _get_struct_q2d().unpack(str[start:end])
+      return self
+    except struct.error as e:
+      raise genpy.DeserializationError(e)  # most likely buffer underfill
+
+
+  def serialize_numpy(self, buff, numpy):
+    """
+    serialize message with numpy array types into buffer
+    :param buff: buffer, ``StringIO``
+    :param numpy: numpy python module
+    """
+    try:
+      _x = self
+      buff.write(_get_struct_q2d().pack(_x.obj_id, _x.loc_centre_x, _x.loc_centre_y))
+    except struct.error as se: self._check_types(struct.error("%s: '%s' when writing '%s'" % (type(se), str(se), str(locals().get('_x', self)))))
+    except TypeError as te: self._check_types(ValueError("%s: '%s' when writing '%s'" % (type(te), str(te), str(locals().get('_x', self)))))
+
+  def deserialize_numpy(self, str, numpy):
+    """
+    unpack serialized message in str into this message instance using numpy for array types
+    :param str: byte array of serialized message, ``str``
+    :param numpy: numpy python module
+    """
+    if python3:
+      codecs.lookup_error("rosmsg").msg_type = self._type
+    try:
+      end = 0
+      _x = self
+      start = end
+      end += 24
+      (_x.obj_id, _x.loc_centre_x, _x.loc_centre_y,) = _get_struct_q2d().unpack(str[start:end])
+      return self
+    except struct.error as e:
+      raise genpy.DeserializationError(e)  # most likely buffer underfill
+
+_struct_I = genpy.struct_I
+def _get_struct_I():
+    global _struct_I
+    return _struct_I
+_struct_q2d = None
+def _get_struct_q2d():
+    global _struct_q2d
+    if _struct_q2d is None:
+        _struct_q2d = struct.Struct("<q2d")
+    return _struct_q2d
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\lib\python3.12\site-packages\semi_auto_match_24\msg\__init__.py ===
+
+from ._LocationCentre import *
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\lib\semi_auto_match_24\arm_ik.py ===
+
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""机械臂可达性判定 + 像素↔机械臂坐标换算（纯数学，无 ROS 依赖）。
+
+被两个地方用：
+* ``nodes/grasp.py`` —— 抓取前先判一次，够不到就别发（见那边的说明）
+* ``test/reachable_area.py`` —— 算出"画面里哪些区域够得到"，指导摆放
+
+数学照抄 ``swiftpro_rviz_node.cpp`` 的 ``swiftpro_ik()``：够不到时内部两个
+``acos`` 的参数会超出 [-1, 1]（三角形两边夹不出这个点），那边就报
+``Inverse kinematic is wrong``。实测对齐：报错那次的 (67.18, 22.28, 20) 判不可达，
+日志里真正抓成功的 (126.42, -8.58) 与 (100.78, -2.77) 判可达。
+
+**别在这里加 ROS 依赖** —— 这个模块要能在没有 roscore 的机器上直接跑。
+"""
+
+import math
+
+# swiftpro 的几何常数（swiftpro_rviz_node.cpp 顶部）
+MATH_TRANS = 57.2958
+MATH_L1 = 106.6
+MATH_L2 = 13.2
+MATH_LOWER_ARM = 142.07
+MATH_UPPER_ARM = 158.81
+MATH_UPPER_LOWER = MATH_UPPER_ARM / MATH_LOWER_ARM
+
+# 手眼标定系数（板上 /data/local/release/usr/thefile.txt）
+# pos.x 由**像素行**算，pos.y 由**像素列**算 —— 原程序就是这样反的，别"顺手改正"。
+DEFAULT_X_KB = (-0.8840816286146583, 448.66407041831445)
+DEFAULT_Y_KB = (-0.8946292902364896, 315.7187464490772)
+
+
+def pixel_to_arm(pixel_row, pixel_col, x_kb=DEFAULT_X_KB, y_kb=DEFAULT_Y_KB):
+    """像素 -> 机械臂坐标（毫米），与 grasp() 里的算法逐字一致。"""
+    return x_kb[0] * pixel_row + x_kb[1], y_kb[0] * pixel_col + y_kb[1]
+
+
+def ik_reachable(x, y, z):
+    """(x, y, z)（毫米）这个位姿机械臂够得到吗？"""
+    z = z + 74.55
+    z_in = (z - MATH_L1) / MATH_LOWER_ARM
+    if x < 0.1:
+        x = 0.1
+    if y == 0:
+        rot = 90.0
+    elif y < 0:
+        rot = -math.atan(x / y) * MATH_TRANS
+    else:
+        rot = 180.0 - math.atan(x / y) * MATH_TRANS
+
+    sin_rot = math.sin(rot / MATH_TRANS)
+    if sin_rot == 0:
+        return False
+    x_in = (x / sin_rot - MATH_L2 - 56.55) / MATH_LOWER_ARM
+    if x_in == 0:
+        return False
+    sqrt_zx = math.sqrt(z_in * z_in + x_in * x_in)
+    if sqrt_zx == 0:
+        return False
+    upper = MATH_UPPER_LOWER
+    right_all = (sqrt_zx * sqrt_zx + upper * upper - 1) / (2 * upper * sqrt_zx)
+    left_all = (sqrt_zx * sqrt_zx + 1 - upper * upper) / (2 * sqrt_zx)
+    return abs(right_all) <= 1 and abs(left_all) <= 1
+
+
+def pixel_reachable(pixel_row, pixel_col, z_list, x_kb=DEFAULT_X_KB, y_kb=DEFAULT_Y_KB):
+    """这个像素对应的位置，在 z_list 里**每个**高度都够得到才算可达。"""
+    ax, ay = pixel_to_arm(pixel_row, pixel_col, x_kb, y_kb)
+    return all(ik_reachable(ax, ay, z) for z in z_list)
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\lib\semi_auto_match_24\detect_rknn.py ===
+
+#!/usr/bin/env python3.12
+"""semi_auto_match_24 的 NPU 物体检测节点（RK3588 + YOLOv5）。
+
+这是原 ``scripts/detect.py``（TensorFlow SSD MobileNet）的 RKNN 替代实现。
+**对外话题与消息类型和原来完全一致**，所以 ``nodes/grasp.py`` 与 launch
+都不用跟着改：
+
+===========  ==============================================  ========================================
+方向          话题                                            类型
+===========  ==============================================  ========================================
+订阅          ``image``                                       ``sensor_msgs/Image``（launch 里 remap）
+发布          ``location``                                    ``semi_auto_match_24/LocationCentre``
+发布          ``debug_image``                                 ``sensor_msgs/Image``
+===========  ==============================================  ========================================
+
+与原版的三处关键差异
+--------------------
+1. **推理换成 RK3588 NPU 上的 YOLOv5**（``librknnrt.so`` + ctypes，见
+   ``python/rknn``）：不再需要 TensorFlow / object_detection /
+   ``mscoco_label_map.pbtxt`` / ``frozen_inference_graph.pb``。
+2. **类别 id 仍然按原程序的编号发布。** 原版发的是 tensorflow_object_detector
+   那份 ``mscoco_label_map.pbtxt`` 的 90 类编号（西兰花 = 56），而 YOLOv5 输出的
+   是 COCO-80 下标（西兰花 = 50）。``config/yolo/coco_labels.txt`` 是
+   ``模型下标 → 外部 id`` 的换算表，默认打开，所以 ``grasp.py`` 里的
+   ``loc.obj_id == 56`` 不用改；``~publish_tf_ids:=false`` 可以关掉换算。
+3. **兴趣区（ROI）裁剪照旧。** 原版只把 640×480 里的 ``[160:480, 160:480]``
+   这块送进模型，再把框中心换算回整幅图像坐标（因为机械臂标定
+   ``thefile.txt`` 是整幅图像坐标系下的）。这里保留同样的裁剪与换算，
+   只是把裁剪框与换算偏移做成了参数（``~roi`` / ``~roi_offset``）。
+
+启动（板上必须走 run 包装，裸 python3 缺 libpython3.12.so）::
+
+    run roslaunch semi_auto_match_24 detect_rknn.launch
+    run rosrun semi_auto_match_24 detect_rknn.py _model_path:=/path/yolov5s.rknn
+"""
+
+import os
+import sys
+import time
+
+import rospkg
+import rospy
+from cv_bridge import CvBridge, CvBridgeError
+from sensor_msgs.msg import Image
+
+from semi_auto_match_24.msg import LocationCentre
+
+# 导入 rknn_yolo 的同时会把 rknn 兼容层挂上 sys.path
+# （见该模块的 _ensure_rknn_importable）
+from rknn_yolo import RknnYoloDetector, draw_detections, load_id_map
+# ROI ↔ 整幅图像坐标的换算单独成模块，好让它能脱离 ROS 单独测
+from roi_map import centre_to_source, crop_slice, parse_offset, parse_roi
+
+# 与本板厂商运行时一致的默认位置；换板子/换模型时用 rosparam 覆盖。
+DEFAULT_MODEL = "/data/local/release/rknn-demo/model/yolov5s-640-640.rknn"
+DEFAULT_CORE_MASK = "0_1_2"
+DEFAULT_IMG_SIZE = [640, 640]
+
+# 原程序的兴趣区：image[160:480, 160:480]，即 640×480 画面里的一块 320×320。
+# 写成 (x, y, w, h) 便于换成别的相机分辨率。
+DEFAULT_ROI = [160, 160, 320, 320]
+
+# 端到端 FPS 的统计窗口（帧数）。只认端到端速率，
+# 用 NPU 调用耗时反推出来的"FPS"会虚高数倍。
+FPS_WINDOW = 30
+
+
+class RknnDetectorNode(object):
+
+    def __init__(self):
+        model_path = rospy.get_param("~model_path", DEFAULT_MODEL)
+        lib_path = rospy.get_param("~lib_path", "") or None
+        labels_path = rospy.get_param("~labels_path", "")
+        anchors_path = rospy.get_param("~anchors_path", "")
+        if not labels_path or not anchors_path:
+            # 只有真要读包内默认文件时才去找包路径：显式给了路径的调用
+            # （例如直接从别的目录跑脚本）不该因为找不到包而失败。
+            yolo_config_dir = os.path.join(
+                rospkg.RosPack().get_path("semi_auto_match_24"), "config", "yolo")
+            labels_path = labels_path or os.path.join(yolo_config_dir, "coco_labels.txt")
+            anchors_path = anchors_path or os.path.join(yolo_config_dir, "anchors_yolov5.txt")
+
+        self.publish_tf_ids = bool(rospy.get_param("~publish_tf_ids", True))
+        self.publish_debug_image = bool(rospy.get_param("~publish_debug_image", True))
+
+        self.roi = parse_roi(rospy.get_param("~roi", DEFAULT_ROI))
+        self.roi_offset = parse_offset(rospy.get_param("~roi_offset", []), self.roi)
+
+        # 类别名与"模型下标 → 外部 id"映射来自同一份标签文件：
+        # 三列格式（下标 外部id 名字）才启用映射，否则按模型下标发布。
+        id_map = load_id_map(labels_path) if self.publish_tf_ids else None
+        if self.publish_tf_ids and id_map is None:
+            rospy.logwarn(
+                "[detect_rknn] %s 不是三列格式（模型下标 外部id 名字），"
+                "本次直接发布模型类别下标；grasp.py 里的 obj_id 会对不上号",
+                labels_path)
+
+        self.detector = RknnYoloDetector(
+            model_path,
+            labels=labels_path if labels_path else None,
+            anchors=anchors_path if anchors_path else None,
+            lib_path=lib_path,
+            img_size=rospy.get_param("~img_size", DEFAULT_IMG_SIZE) or None,
+            conf_thres=rospy.get_param("~conf_thres", 0.25),
+            nms_thres=rospy.get_param("~nms_thres", 0.45),
+            core_mask=rospy.get_param("~core_mask", DEFAULT_CORE_MASK),
+            head=rospy.get_param("~head", "auto"),
+            sigmoid=rospy.get_param("~sigmoid", "auto"),
+            max_det=rospy.get_param("~max_det", 100),
+            id_map=id_map,
+            verbose=bool(rospy.get_param("~verbose", False)),
+        )
+        rospy.loginfo("[detect_rknn] %s", self.detector.describe())
+        rospy.loginfo("[detect_rknn] 兴趣区 roi=%s，换算偏移 roi_offset=%s",
+                      self.roi, self.roi_offset)
+        if id_map:
+            rospy.loginfo("[detect_rknn] 类别 id 已按映射表换算（%d 类）", len(id_map))
+
+        self.bridge = CvBridge()
+        self.image_pub = rospy.Publisher("debug_image", Image, queue_size=1)
+        self.location_pub = rospy.Publisher("location", LocationCentre, queue_size=10)
+        # 只留最新一帧：处理慢时自动丢旧帧，而不是排队造成延迟累积。
+        self.image_sub = rospy.Subscriber("image", Image, self.image_cb,
+                                          queue_size=1, buff_size=2 ** 24)
+        self._stamps = []
+        rospy.on_shutdown(self.detector.release)
+
+    # -- 每帧 ----------------------------------------------------------
+    def image_cb(self, msg):
+        try:
+            image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+        except CvBridgeError as exc:
+            rospy.logerr_throttle(5.0, "[detect_rknn] 图像转换失败: %s", exc)
+            return
+
+        roi_image = self._crop(image)
+        if roi_image is None:
+            rospy.logerr_throttle(
+                5.0, "[detect_rknn] 图像 %s 装不下兴趣区 %s，请改 ~roi",
+                image.shape, self.roi)
+            return
+
+        try:
+            detections = self.detector.infer(roi_image)
+        except Exception as exc:            # 单帧异常不该打死节点
+            rospy.logerr_throttle(5.0, "[detect_rknn] 推理失败: %s", exc)
+            return
+
+        for det in detections:
+            self.location_pub.publish(self._build_location(det))
+
+        if self.publish_debug_image:
+            draw_detections(roi_image, detections)
+            try:
+                out = self.bridge.cv2_to_imgmsg(roi_image, "bgr8")
+            except CvBridgeError as exc:
+                rospy.logerr_throttle(5.0, "[detect_rknn] 调试图转换失败: %s", exc)
+            else:
+                out.header = msg.header
+                self.image_pub.publish(out)
+
+        self._record_fps()
+
+    def _crop(self, image):
+        """按 ``~roi`` 裁出兴趣区；画面比 ROI 小就返回 None（不猜、不补边）。"""
+        window = crop_slice(image.shape, self.roi)
+        if window is None:
+            return None
+        return image[window]
+
+    def _build_location(self, det):
+        """把 ROI 内的框中心换算回整幅图像坐标，发成原程序的 LocationCentre。
+
+        原版是 ``int((x_min + x_max) * roi_w / 2 + roi_x)``，即
+        "ROI 内中心 + ROI 原点"；换算细节见 ``nodes/roi_map.py``。
+        """
+        cx, cy = centre_to_source(det.x1, det.y1, det.x2, det.y2, self.roi_offset)
+        loc = LocationCentre()
+        loc.obj_id = int(det.class_id)
+        loc.loc_centre_x = cx
+        loc.loc_centre_y = cy
+        return loc
+
+    def _record_fps(self):
+        now = time.time()
+        self._stamps.append(now)
+        if len(self._stamps) > FPS_WINDOW:
+            del self._stamps[:-FPS_WINDOW]
+        if len(self._stamps) < 2:
+            return
+        span = self._stamps[-1] - self._stamps[0]
+        fps = (len(self._stamps) - 1) / span if span > 0 else 0.0
+        rospy.loginfo_throttle(
+            2.0, "[detect_rknn] 端到端 %.1f FPS | NPU %.1f ms | 后处理 %.1f ms",
+            fps, self.detector.last_infer_ms, self.detector.last_post_ms)
+
+
+def main(argv):
+    rospy.init_node("detect_rknn", argv=argv)
+    try:
+        RknnDetectorNode()
+    except Exception as exc:
+        # 模型/运行时版本不匹配这类问题必须立刻暴露，而不是静默发空消息。
+        rospy.logfatal("[detect_rknn] 初始化失败: %s", exc)
+        return 1
+    try:
+        rospy.spin()
+    except KeyboardInterrupt:
+        print("ShutDown")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\lib\semi_auto_match_24\grasp.py ===
+
+#!/usr/bin/env python3.12
+# -*- coding: utf-8 -*-
+
+import os
+import sys
+import time
+import random
+import rospy
+import string
+import math
+import cv2
+import numpy as np
+from geometry_msgs.msg import Twist
+from std_msgs.msg import String
+from geometry_msgs.msg import Pose, Point, Quaternion
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge, CvBridgeError
+
+from semi_auto_match_24.msg import LocationCentre
+
+# 机械臂消息：优先用本工具链编出来的 spark_carry_object；
+try:
+    from spark_carry_object.msg import position, status
+except ImportError:                                  # pragma: no cover
+    from swiftpro.msg import position, status
+
+# 默认的手眼标定文件（4 个数：x 的 k/b、y 的 k/b）。
+HOME_CALIB_FILE = os.path.expanduser("~/thefile.txt")
+BOARD_CALIB_FILE = "/data/local/release/usr/thefile.txt"
+
+# ---------------------------------------------------------------------------
+# 抓取高度（单位 **毫米** —— swiftpro 的 position.z 就是 mm，
+# swiftpro_write_node.cpp 直接拼成 Gcode "G0 X.. Y.. Z.."，注释里写明 x,y,z(mm)）
+#
+# 水源和物块用同一个高度**，跟按的是大写还是小写无关。
+DEFAULT_HEIGHT = {"z_up": 20.0, "z_down": -45.0}
+
+# 颜色阈值（OpenCV HSV：H 0~179 / S 0~255 / V 0~255），可由 config/grasp_colors.yaml 覆盖。
+DEFAULT_COLORS = {
+    "water": {"lower": [95, 90, 80], "upper": [130, 255, 255]},
+}
+
+
+def target_of(layer):
+    """把 grasp_cp 收到的 msg.data 映射成目标名，只用于打日志；认不出返回 None。
+
+    '0'/'10' 水源、'4'/'11' 物块（西兰花）。
+    '6'/'12' 原本是红色方块，本版已删除，故意不再映射（日志里会显示 None）。
+    """
+    if layer in ("0", "10"):
+        return "water"
+    if layer in ("4", "11"):
+        return "broccoli"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 可达性检查：见 nodes/arm_ik.py。
+#
+# 为什么需要它：标定把像素映射成机械臂坐标，但**机械臂够不到所有位置** ——
+# 底座附近有一圈死区（z=20 时半径约 50~95mm 那一带），图像最上方那 1/4
+# （pos.x > ~370mm）也整体超出臂展。发过去固件不接受：表现为**机械臂不动**，
+# 而 grasp() 后面照样开泵、照样抬到 (230,0,160) —— 看起来就像"没抓就跑了"。
+# 同时 swiftpro_rviz_node 会刷 "Inverse kinematic is wrong"（那个节点只是把位姿
+# 画到 rviz，不参与实际运动，所以那句报错本身不是原因，是同一个数学结论）。
+#
+# 实测对齐：报错那次的 (67.18, 22.28, 20) 判不可达；日志里真正抓成功的
+# (126.42, -8.58) 与 (100.78, -2.77) 判可达。
+try:
+    from arm_ik import ik_reachable, pixel_to_arm
+except ImportError:                                    # 从源码树直接跑时
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from arm_ik import ik_reachable, pixel_to_arm
+
+
+def resolve_calib_file():
+    """决定用哪个标定文件：``~calib_file`` > 环境变量 > HOME > 本板落点。"""
+    candidates = []
+    explicit = rospy.get_param("~calib_file", "")
+    if explicit:
+        candidates.append(explicit)
+    env = os.environ.get("SEMI_AUTO_MATCH_CALIB")
+    if env:
+        candidates.append(env)
+    candidates.append(HOME_CALIB_FILE)
+    candidates.append(BOARD_CALIB_FILE)
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    raise RuntimeError(
+        "找不到手眼标定文件；找过: %s。用 ~calib_file:=<路径> 指定，"
+        "或设 SEMI_AUTO_MATCH_CALIB，或先按原流程做一次标定生成它" % (candidates,))
+
+
+class GraspObject():
+
+    def __init__(self):
+        '''
+        初始化参数
+        x & y 代表水源的中心点位置信息
+        x_prev & y_prev 代表前一轮记录的中心点
+        found_count 代表识别中心点的次数
+        self.found_*** 代表是否准确找到水源的中心点
+        '''
+
+        # 定义水源参数
+        self.water_found_count = 0 ; self.found_water = False 
+        self.water_x = 0 ; self.water_y = 0 ; self.water_x_prev = 0 ; self.water_y_prev = 0
+        
+        # 定义西兰花参数
+        self.broccoli_found_count = 0 ; self.found_broccoli = False
+        self.broccoli_x = 0 ; self.broccoli_y = 0 ; self.broccoli_x_prev = 0 ; self.broccoli_y_prev = 0 
+
+        # 调试窗：板端要 run_gui 才有 GL 上下文，默认关。
+        self.show_debug = bool(rospy.get_param("~show_debug", False))
+        self._debug_failed = False
+
+        # 获取标定文件数据
+        filename = resolve_calib_file()
+        rospy.logwarn('手眼标定文件: ' + filename)
+        with open(filename, 'r') as f:
+            s = f.read()
+        arr = s.split()
+        self.x_kb = [float(arr[0]), float(arr[1])]
+        self.y_kb = [float(arr[2]), float(arr[3])]
+        rospy.logwarn('X axia k and b value: ' + str(self.x_kb))
+        rospy.logwarn('X axia k and b value: ' + str(self.y_kb))
+
+        # 抓取高度：两个目标共用一套，可由 config/grasp_heights.yaml 覆盖
+        self.z_up = float(rospy.get_param("~z_up", DEFAULT_HEIGHT["z_up"]))
+        self.z_down = float(rospy.get_param("~z_down", DEFAULT_HEIGHT["z_down"]))
+        rospy.logwarn("抓取高度(mm): z_up=%.0f z_down=%.0f（水源/物块共用）"
+                      % (self.z_up, self.z_down))
+
+        # 颜色阈值：可由 config/grasp_colors.yaml 覆盖
+        self.color = {}
+        for _name, _dflt in DEFAULT_COLORS.items():
+            self.color[_name] = (
+                np.array(rospy.get_param("~%s/lower" % _name, _dflt["lower"])),
+                np.array(rospy.get_param("~%s/upper" % _name, _dflt["upper"])),
+            )
+        rospy.logwarn("颜色阈值(HSV): " + "；".join(
+            "%s H[%d,%d] S[%d,%d] V[%d,%d]"
+            % ((_n,) + tuple(self.color[_n][0]) + tuple(self.color[_n][1]))
+            for _n in sorted(self.color)))
+
+        # 发布机械臂位姿
+        self.pub1 = rospy.Publisher('position_write_topic', position, queue_size=10)
+        # 发布机械臂吸盘
+        self.pub2 = rospy.Publisher('pump_topic', status, queue_size=1)
+        # 发布TWist消息控制机器人底盘
+        self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
+        # 订阅机械臂抓取指令
+        self.sub2 = rospy.Subscriber('/grasp', String, self.grasp_cp, queue_size=1)
+        # 机械臂 attach/detach（/swiftpro_status_topic；上电初始化用）
+        self.arm_status_pub = rospy.Publisher('/swiftpro_status_topic', status, queue_size=1)
+        # 订阅摄像头话题,接收图像信息后跳转image_cb进行处理
+        self.sub = rospy.Subscriber("/camera/color/image_raw", Image, self.image_cb, queue_size=1)
+        # 订阅物体识别位置
+        self.detector_object = rospy.Subscriber("location", LocationCentre, self.object_cb,queue_size=1)
+
+        # 上电初始化：给机械臂发一次 attach（0→M2019 断开 → 1→M17 接上）
+        self.arm_attach()
+        pos = position()
+        pos.x = 20
+        pos.y = 150
+        pos.z = 35
+        self.pub1.publish(pos)
+
+
+    def object_cb(self, loc):   
+        print("loc_id:",loc.obj_id)  
+
+        # 判断是否识别到西兰花 56 
+        if loc.obj_id == 56:  
+            rospy.loginfo("locating the broccoli")
+
+            self.broccoli_x = loc.loc_centre_x
+            self.broccoli_y = loc.loc_centre_y
+            
+            print("broccoli: ", self.broccoli_x, self.broccoli_y) 
+            
+            if self.broccoli_found_count >= 10:
+                # 将找到物体的参数设定为True
+                self.found_broccoli = True
+            else:
+                # 判断识别的水源中心点位置有无移动
+                if abs(self.broccoli_x - self.broccoli_x_prev) <= 10 and abs(self.broccoli_y - self.broccoli_y_prev) <= 10:
+                    self.broccoli_found_count +=  1
+                else:
+                    # 一旦移动，归零
+                    self.broccoli_found_count = 0
+                    self.found_broccoli = False
+            
+            self.broccoli_x_prev = self.broccoli_x
+            self.broccoli_y_prev = self.broccoli_y
+
+        
+
+    # 对传入的一帧图像进行处理，使用CV检测物体       
+    def image_cb(self, data):
+        # 将 ROS image消息类型转换成opencv类型  
+        try:
+            cv_image1 = CvBridge().imgmsg_to_cv2(data, "bgr8")
+            # print(cv_image1.shape)
+        except CvBridgeError as e:
+            print('error')
+        # 由RGB颜色转换成HSV颜色空间
+        cv_image2 = cv2.cvtColor(cv_image1, cv2.COLOR_BGR2HSV)
+        # 蓝色物体颜色检测范围（可由 config/grasp_colors.yaml 覆盖）
+        LowerBlue, UpperBlue = self.color["water"]
+        # 阈值处理
+        mask = cv2.inRange(cv_image2, LowerBlue, UpperBlue)
+        # 位运算，对图像进行掩膜处理
+        cv_image3 = cv2.bitwise_and(cv_image2, cv_image2, mask=mask)
+        # 取三维矩阵中第一维的所有数据
+        cv_image4 = cv_image3[:, :, 0]
+        # 均值滤波处理
+        blurred = cv2.blur(cv_image4, (9, 9))
+        # 简单阈值函数
+        (_, thresh) = cv2.threshold(blurred, 90, 255, cv2.THRESH_BINARY)
+        # 获取结构元素
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+        # 执行高级形态变换
+        cv_image5 = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        # 腐蚀处理
+        cv_image5 = cv2.erode(cv_image5, None, iterations=4)
+        # 扩张处理
+        cv_image5 = cv2.dilate(cv_image5, None, iterations=4) 
+        # 检测轮廓
+        contours, hier = cv2.findContours(cv_image5, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        # 轮廓为空时 drawContours(..., 0, ...) 会断言失败，先判断
+        if len(contours) > 0:
+            cv2.drawContours(cv_image1, contours, 0, (0, 255, 0), 2)
+        # 显示图像
+        
+
+        # 根据检测的轮廓信息，找到其中距离最近的水源
+        # len(contours) 识别到的水源的个数
+        if len(contours) > 0:
+            dis = []    
+            dis_min = 640          
+            # enumerate()为迭代的对象添加序列号
+            for i, c in enumerate(contours):
+                # 绘制水源图形
+                rect = cv2.minAreaRect(c)
+                box = cv2.boxPoints(rect)
+                box = np.intp(box)
+                # 计算水源中心点
+                x_mid = (box[0][0] + box[2][0] + box[1][0] + box[3][0]) / 4
+                y_mid = (box[0][1] + box[2][1] + box[1][1] + box[3][1]) / 4
+                # w = math.sqrt((box[0][0] - box[1][0]) ** 2 + (box[0][1] - box[1][1]) ** 2)
+                # h = math.sqrt((box[0][0] - box[3][0]) ** 2 + (box[0][1] - box[3][1]) ** 2)
+                distance =  math.sqrt((x_mid-320)**2+(480-y_mid)**2)
+                # 找出距离最近的水源
+                dis.append(distance)
+                if dis[i] < dis_min:    
+                    dis_min = dis[i]
+                    self.water_x = x_mid
+                    self.water_y = y_mid
+            
+            # 基于有可能出现在移动或旋转过程中识别到水源的情况
+            # 设定found_count参数判断水源有无移动
+            # 当found_count次数达到30时，认为水源没有移动，可以进行定位           
+            if self.water_found_count >= 30:
+                # 将找到物体的参数设定为True
+                self.found_water = True                
+            else:
+                # 判断识别的水源中心点位置有无移动
+                if abs(self.water_x - self.water_x_prev) <= 4 and abs(self.water_y - self.water_y_prev) <= 4:
+                    self.water_found_count = self.water_found_count + 1
+                else:
+                    # 一旦移动，归零
+                    self.water_found_count = 0
+        else:
+            # 没有找到轮廓，判断水源移动参数归零
+            self.water_found_count = 0
+
+        self.water_x_prev = self.water_x
+        self.water_y_prev = self.water_y
+
+
+        # print("water_pos: ", self.water_x, self.water_y)
+        
+        cv2.circle(cv_image1, (int(self.water_x), int(self.water_y)), 5, (0, 0, 255), -1)
+
+        self._show("contours", cv_image1)
+
+    def _show(self, window, image):
+        """调试窗。板端要有 GL 上下文（run_gui）才画得出来；
+        画不出来只警告一次，不打断抓取流程。"""
+        if not self.show_debug:
+            return
+        try:
+            cv2.imshow(window, image)
+            cv2.waitKey(1)
+        except Exception as exc:
+            if not self._debug_failed:
+                self._debug_failed = True
+                rospy.logwarn(
+                    "cv2.imshow 失败（%s）；板端需要 run_gui 前缀，"
+                    "或把 ~show_debug 设成 false", exc)
+
+
+    def grasp_cp(self, msg):
+        # 设置睡眠时间
+        rate = rospy.Rate(1)
+        # 接受到进行抓取水源的信号
+        if msg.data == '0' or msg.data == '10':            
+            # 若未能获取水源准确中心点进入此循环
+            while not self.found_water:
+                rospy.logwarn('finding water' )
+                rate.sleep()
+            # 抓取检测到的物体    
+            print("water grasp on!!!!!!")
+            self.grasp(self.water_x,self.water_y, msg.data)
+            self.found_water = False
+
+        # 接受到进行抓取西兰花的信号
+        elif msg.data == '4' or msg.data == '11':            
+            # 若未能获取西兰花准确中心点进入此循环
+            while not self.found_broccoli:
+                rospy.logwarn('finding broccoli')
+                rate.sleep()
+            # 抓取检测到的物体
+            print("grasping the broccoli")
+            self.grasp(self.broccoli_x,self.broccoli_y, msg.data)
+            self.broccoli_found_count = 0
+
+        # 接受到进行放置的信号
+        else:
+            height = int(msg.data)
+            
+            self.release_object(height)
+            rate.sleep()
+
+    # 执行抓取
+    def grasp(self,y,x, layer):        
+        print("start to grasp\n")
+        # 设定睡眠时间
+        r1 = rospy.Rate(0.5)
+        r2 = rospy.Rate(10)
+
+        # 高度两个目标共用一套；大小写只决定发哪条指令，不影响高度。
+        z_up = self.z_up
+        z_down = self.z_down
+        rospy.loginfo("抓取目标=%s layer=%s -> z_up=%.0f z_down=%.0f (mm)",
+                      target_of(layer), layer, z_up, z_down)
+
+
+        # 物体所在坐标+标定误差
+        # 控制机械臂到目标上方
+        pos = position()
+        # 注意本函数的形参顺序是 (y, x)，调用处传的是 (像素列, 像素行)：
+        # 所以这里 x 是**行**、y 是**列**（原程序就是这么反的，没动）。
+        pos.x, pos.y = pixel_to_arm(x, y, self.x_kb, self.y_kb)
+        pos.z = z_up
+        print("pos.x=",pos.x,"pos.y=",pos.y,"pos.z=",pos.z)
+
+        # 够不到就别发了 —— 固件不接受，机械臂不会动，但后面照样开泵、照样抬走，
+        # 现场看起来就是"没抓就跑了"。这里直接放弃，并说清该把物体挪到哪。
+        if not (ik_reachable(pos.x, pos.y, z_up) and ik_reachable(pos.x, pos.y, z_down)):
+            rospy.logerr(
+                "抓取位姿机械臂够不到，放弃本次抓取（不吸、不抬）: "
+                "像素(行=%.0f, 列=%.0f) -> 机械臂(%.1f, %.1f) z=%.0f/%.0f；"
+                "把物体挪到画面可达区域再试（大约行 320~400，即画面中下部，"
+                "避开最上方 1/4 和底部中央的缺口）",
+                x, y, pos.x, pos.y, z_up, z_down)
+            return
+
+        self.pub1.publish(pos)
+        rospy.sleep(2)
+
+        # 控制机械臂向下运动 
+        pos.x, pos.y = pixel_to_arm(x, y, self.x_kb, self.y_kb)
+        pos.z = z_down
+        print(pos.z)
+        self.pub1.publish(pos)
+        # r2.sleep()
+        rospy.sleep(4)
+
+        # 开始吸取物体
+        self.pub2.publish(1)
+        rospy.sleep(1)
+
+        # 提起物体
+        pos.x = 230  
+        pos.y = 0
+        pos.z = 160  
+        self.pub1.publish(pos)
+        rospy.sleep(1)
+
+    # 放物体
+    def release_object(self,height):
+        r1 = rospy.Rate(1)     # 1s
+        pos = position()
+
+        if height == 1:
+            pos.x = 220
+            pos.y = 0
+            pos.z = -40  #-80
+            self.pub1.publish(pos)
+            r1.sleep()
+
+        # stop pump
+        self.pub2.publish(0)
+        r1.sleep()
+
+        self.arm_to_home()
+
+
+    def arm_to_home(self):
+        pos = position()
+        pos.x = 20;pos.y = 150;pos.z=60     # 140 0 0
+        self.pub1.publish(pos)
+        rospy.sleep(1)
+
+
+
+
+    def arm_attach(self):
+        """上电初始化：给 /swiftpro_status_topic 发 0→1。
+        ``__init__`` 里跑一次，给机械臂做上电 attach。
+        """
+        print("arm attach\n")
+        r1 = rospy.Rate(1)
+        self.arm_status_pub.publish(0)
+        r1.sleep()
+        self.arm_status_pub.publish(1)
+        r1.sleep()
+
+
+        
+if __name__ == '__main__':
+    try:
+        rospy.init_node('GraspObject', anonymous=False)
+        rospy.loginfo("Init GraspObject main")   
+        GraspObject()
+        rospy.spin()
+    except rospy.ROSInterruptException:
+        rospy.loginfo("End spark GraspObject main")
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\lib\semi_auto_match_24\rknn_yolo.py ===
+
+"""通用 YOLO 检测运行时（RK3588 NPU，基于 ``rknn`` 兼容层）。
+
+本模块与 ROS 无关，可以单独在板子上跑单测/基准：
+``run python3 rknn_yolo.py <model.rknn> <bus.jpg>``。
+
+支持的导出头
+------------
+* **v5 系**（yolov5 / v6 / v7）：3 个带 anchor 的尺度头，通道数 = na*(5+nc)，
+  含 objectness 通道；输出可能是 raw logits（自动识别并补 sigmoid）。
+* **v8 系**（yolov8 / v9 / v11）：单头 ``(1, 4+nc, N)`` 或 ``(1, N, 4+nc)``，
+  无 objectness、无 anchor，xywh 已经是输入图像像素。
+
+DFL 未解码的 6 输出头（3×box + 3×cls）不做支持，遇到会给出明确报错而不是猜。
+
+解码的两条硬约定
+----------------
+1. **先过滤后解码**：阈值判断只跑 objectness（v5）或类分数（v8）这一个通道，
+   只对过阈值的候选做 sigmoid 与框解码。25200 个 anchor 全量解码是纯浪费，
+   而 ``conf = class_max * objectness <= objectness``，所以先按 objectness
+   过滤不会漏框（数学等价，不是近似）。
+2. **框一律用 xyxy 表示**，NMS 交集直接算 ``min(x2) - max(x1)``；
+   不要退回 (x, y, w, h) 那种写法——那里漏写右下角的 ``+w``/``+h``
+   会让 IoU 恒为 0，NMS 静默失效（见 SKILL 铁律 8）。
+"""
+
+import collections
+import os
+import sys
+import time
+
+import cv2
+import numpy as np
+
+__all__ = [
+    "Detection",
+    "LetterBox",
+    "RknnYoloDetector",
+    "load_labels",
+    "load_id_map",
+    "draw_detections",
+]
+
+# ------------------------------------------------------- rknn 兼容层定位 ----
+
+def _ensure_rknn_importable():
+    """先 import rknn；失败则把本包自带的兼容层目录塞进 sys.path。
+
+    安装后的布局与源码树的布局不同，两条候选路径都要覆盖：
+
+    * 源码树     ``semi_auto_match_24/nodes/rknn_yolo.py`` → ``semi_auto_match_24/python``
+    * 安装树     ``usr/lib/semi_auto_match_24/rknn_yolo.py`` → ``usr/share/semi_auto_match_24/python``
+
+    这样调用方只要 ``import rknn_yolo`` 就行，不必自己管 sys.path 顺序。
+    """
+    try:
+        import rknn  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.environ.get("SEMI_AUTO_MATCH_RKNN_PY"),
+        os.path.join(here, os.pardir, "python"),
+        os.path.join(here, os.pardir, os.pardir, "share", "semi_auto_match_24", "python"),
+    ]
+    tried = []
+    for candidate in candidates:
+        if not candidate:
+            continue
+        candidate = os.path.abspath(candidate)
+        tried.append(candidate)
+        if os.path.isdir(os.path.join(candidate, "rknn")):
+            if candidate not in sys.path:
+                sys.path.insert(0, candidate)
+            import rknn  # noqa: F401
+            return
+    raise ImportError(
+        "找不到 rknn 兼容层。已尝试: %s；也可以用环境变量 SEMI_AUTO_MATCH_RKNN_PY "
+        "指向含 rknn/ 子目录的目录" % (tried,)
+    )
+
+
+_ensure_rknn_importable()
+
+from rknn.api import RKNNLite, core_mask_from_string, error_name  # noqa: E402
+
+
+# --------------------------------------------------------------- 标签/映射 ----
+
+def _iter_data_lines(path):
+    with open(path, "r") as handle:
+        for lineno, raw in enumerate(handle, 1):
+            line = raw.split("#", 1)[0].strip()
+            if line:
+                yield lineno, line
+
+
+def _is_int(text):
+    try:
+        int(text)
+    except ValueError:
+        return False
+    return True
+
+
+def _parse_label_line(line):
+    """解析一行标签，返回 ``(模型下标|None, 外部id|None, 名称)``。
+
+    下面几种写法都支持，名称允许带空格（取剩余部分，不会把 ``wine glass``
+    截成 ``glass``）：
+
+    * ``person``           —— 只有名字
+    * ``0 person``         —— 模型类别下标 + 名字
+    * ``0 1 person``       —— 模型下标 + 外部 id + 名字（本包配置的格式）
+    * ``0 1 wine glass``   —— 名字带空格
+    """
+    parts = line.split(None, 2)
+    if len(parts) == 3 and _is_int(parts[0]) and _is_int(parts[1]):
+        return int(parts[0]), int(parts[1]), parts[2]
+    if len(parts) >= 2 and _is_int(parts[0]):
+        return int(parts[0]), None, line.split(None, 1)[1]
+    return None, None, line
+
+
+def load_labels(path):
+    """读类别名列表，一行一个（格式见 :func:`_parse_label_line`）。"""
+    if not path:
+        return None
+    names = []
+    for lineno, line in _iter_data_lines(path):
+        name = _parse_label_line(line)[2]
+        if not name:
+            raise ValueError("%s:%d 解析不出类别名" % (path, lineno))
+        names.append(name)
+    if not names:
+        raise ValueError("标签文件是空的: %s" % path)
+    return names
+
+
+def load_id_map(path):
+    """读"模型类别下标 → 对外 id"的映射表。
+
+    要求**每行都带下标与外部 id**（``下标 外部id 名字``），否则返回 ``None``
+    表示这份标签文件不做映射。返回的列表下标即模型类别下标。
+    """
+    if not path:
+        return None
+    rows = []
+    for _, line in _iter_data_lines(path):
+        index, external, _ = _parse_label_line(line)
+        if index is None or external is None:
+            return None
+        rows.append((index, external))
+    if not rows:
+        return None
+    rows.sort()
+    if [index for index, _ in rows] != list(range(len(rows))):
+        raise ValueError("%s 的模型类别下标必须是 0..%d 连续" % (path, len(rows) - 1))
+    return [external for _, external in rows]
+
+
+# --------------------------------------------------------------- letterbox ----
+
+class LetterBox(object):
+    """等比缩放 + 居中填充，映射规则与 rknn_model_zoo 的 COCO_test_helper 一致。
+
+    ``to_source`` 把解码出来的框从"填充后的输入空间"搬回"原图像素"。
+    """
+
+    def __init__(self, new_shape=(640, 640), pad_value=(0, 0, 0)):
+        self.new_shape = (int(new_shape[0]), int(new_shape[1]))  # (h, w)
+        self.pad_value = pad_value
+        self.ratio = 1.0
+        self.dw = 0.0
+        self.dh = 0.0
+
+    def apply(self, img):
+        h, w = img.shape[:2]
+        new_h, new_w = self.new_shape
+        ratio = min(float(new_h) / h, float(new_w) / w)
+        new_unpad = (int(round(w * ratio)), int(round(h * ratio)))
+        dw = (new_w - new_unpad[0]) / 2.0
+        dh = (new_h - new_unpad[1]) / 2.0
+        if (w, h) != new_unpad:
+            img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
+        top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+        left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+        img = cv2.copyMakeBorder(img, top, bottom, left, right,
+                                 cv2.BORDER_CONSTANT, value=self.pad_value)
+        self.ratio, self.dw, self.dh = ratio, dw, dh
+        return img
+
+    def to_source(self, boxes):
+        out = np.array(boxes, dtype=np.float32, copy=True)
+        out[:, [0, 2]] = (out[:, [0, 2]] - self.dw) / self.ratio
+        out[:, [1, 3]] = (out[:, [1, 3]] - self.dh) / self.ratio
+        return out
+
+
+Detection = collections.namedtuple(
+    "Detection", "class_id label score x1 y1 x2 y2"
+)
+
+
+# ------------------------------------------------------------------ 检测器 ----
+
+class RknnYoloDetector(object):
+    """把 ``.rknn`` 模型包成 ``infer(bgr) -> [Detection]``。
+
+    :param model_path: ``.rknn`` 模型路径
+    :param labels: 类别名列表，或标签文件路径（见 :func:`load_labels`）
+    :param anchors: anchor 列表 ``[[[w,h], ...], ...]``（每个尺度一组），
+                    v5 系必需；给文件路径时按每行一个数字读，形状 ``(n_scale, -1, 2)``
+    :param img_size: ``(w, h)``；None 表示从模型输入属性里读
+    :param id_map: 模型类别下标 → 对外 id 的映射；None 表示不映射
+    :param head: ``auto`` / ``v5`` / ``v8``
+    :param sigmoid: ``auto`` / ``on`` / ``off``；只作用于 v5 系的解码
+    """
+
+    def __init__(self, model_path, labels=None, anchors=None, lib_path=None,
+                 img_size=None, conf_thres=0.25, nms_thres=0.45,
+                 core_mask="0_1_2", head="auto", sigmoid="auto",
+                 max_det=100, id_map=None, verbose=False, warmup=True):
+        self.model_path = model_path
+        self.conf_thres = float(conf_thres)
+        self.nms_thres = float(nms_thres)
+        self.head = head
+        self.sigmoid = sigmoid
+        self.max_det = int(max_det)
+        self.verbose = bool(verbose)
+        self.lib_path = lib_path
+
+        self.labels = load_labels(labels) if isinstance(labels, str) else labels
+        self.id_map = list(id_map) if id_map is not None else None
+        self.anchors = self._read_anchors(anchors)
+
+        self.last_infer_ms = 0.0
+        self.last_post_ms = 0.0
+        self.frames = 0
+        self.head_kind = None
+        self.num_classes = None
+
+        self._rknn = RKNNLite(verbose=self.verbose, lib_path=lib_path)
+        ret = self._rknn.load_rknn(model_path)
+        if ret != 0:
+            raise RuntimeError("load_rknn(%s) 失败: %s" % (model_path, error_name(ret)))
+        self._rknn.init_runtime(core_mask=core_mask_from_string(core_mask))
+
+        if img_size is None:
+            img_size = self._detect_input_size()
+        self.img_size = (int(img_size[0]), int(img_size[1]))    # (w, h)
+
+        if warmup:
+            self._warmup()
+
+    def _warmup(self):
+        """用一张空图跑一次完整前向。
+
+        两个作用：把模型能跑通这件事在**节点启动时**就验证掉（而不是等第一帧
+        图像才发现模型/运行时不对），以及把 head 类型与类别数定下来，
+        好让启动日志里直接看到真实的 nc —— 类别数对不上是最常见的错配。
+        """
+        blank = np.zeros((self.img_size[1], self.img_size[0], 3), dtype=np.uint8)
+        self.infer(blank)
+        self.frames = 0
+        self.last_infer_ms = 0.0
+        self.last_post_ms = 0.0
+
+    # -- 初始化辅助 ----------------------------------------------------
+    @staticmethod
+    def _read_anchors(anchors):
+        if anchors is None:
+            return None
+        if isinstance(anchors, str):
+            values = []
+            for _, line in _iter_data_lines(anchors):
+                values.append(float(line.split()[0]))
+            return np.array(values, dtype=np.float32).reshape(3, -1, 2).tolist()
+        return np.array(anchors, dtype=np.float32).tolist()
+
+    def _detect_input_size(self):
+        """从模型输入属性里读输入尺寸；读不到就报错让人显式给 img_size。"""
+        attrs = getattr(self._rknn, "input_attrs", None)
+        if not attrs:
+            raise ValueError("拿不到模型输入属性，请显式指定 img_size=(w, h)")
+        shape = attrs[0].shape
+        if len(shape) != 4:
+            raise ValueError("输入维度不是 4 维: %s，请显式指定 img_size" % (shape,))
+        # NHWC: (1, H, W, C)；NCHW: (1, C, H, W)
+        if attrs[0].is_nhwc or shape[-1] in (1, 3, 4):
+            return (int(shape[2]), int(shape[1]))
+        return (int(shape[3]), int(shape[2]))
+
+    @property
+    def runtime_versions(self):
+        return (self._rknn.sdk_version, self._rknn.driver_version)
+
+    def describe(self):
+        return ("model=%s api=%s driver=%s input=%dx%d head=%s nc=%s conf=%.2f nms=%.2f"
+                % (os.path.basename(self.model_path), self._rknn.sdk_version,
+                   self._rknn.driver_version, self.img_size[0], self.img_size[1],
+                   self.head_kind or self.head, self.num_classes,
+                   self.conf_thres, self.nms_thres))
+
+    # -- 推理 ----------------------------------------------------------
+    def infer(self, bgr_image):
+        """对一帧 BGR uint8 图像做检测。
+
+        :returns: ``[Detection]``，坐标已反映射回原图像素，按分数降序。
+        """
+        if bgr_image is None or getattr(bgr_image, "size", 0) == 0:
+            return []
+
+        box = LetterBox((self.img_size[1], self.img_size[0]))
+        padded = box.apply(bgr_image)
+        # 驱动按模型元数据做 mean/std/rgb2bgr，这里只负责把 BGR 转成模型要的 RGB。
+        rgb = np.ascontiguousarray(cv2.cvtColor(padded, cv2.COLOR_BGR2RGB))
+
+        start = time.time()
+        outputs = self._rknn.inference(inputs=[rgb], data_type="uint8",
+                                       data_format="nhwc")
+        self.last_infer_ms = (time.time() - start) * 1000.0
+        self.frames += 1
+
+        post_start = time.time()
+        kind = self._resolve_head_kind(outputs)
+        if kind == "v5":
+            boxes, classes, scores = self._post_process_v5(outputs)
+        else:
+            boxes, classes, scores = self._post_process_v8(outputs)
+
+        detections = []
+        if boxes is not None and len(boxes):
+            real = box.to_source(boxes)
+            height, width = bgr_image.shape[:2]
+            order = np.argsort(-scores)[:self.max_det]
+            for idx in order:
+                x1, y1, x2, y2 = real[idx]
+                x1 = int(round(min(max(x1, 0), width - 1)))
+                y1 = int(round(min(max(y1, 0), height - 1)))
+                x2 = int(round(min(max(x2, 0), width - 1)))
+                y2 = int(round(min(max(y2, 0), height - 1)))
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                raw_id = int(classes[idx])
+                class_id = self.id_map[raw_id] if self.id_map else raw_id
+                detections.append(Detection(class_id, self._class_name(raw_id),
+                                            float(scores[idx]), x1, y1, x2, y2))
+        self.last_post_ms = (time.time() - post_start) * 1000.0
+        return detections
+
+    def _class_name(self, raw_id):
+        if self.labels and 0 <= raw_id < len(self.labels):
+            return self.labels[raw_id]
+        return str(raw_id)
+
+    # -- head 判定 -----------------------------------------------------
+    def _resolve_head_kind(self, outputs):
+        if self.head in ("v5", "v8"):
+            kind = self.head
+        else:
+            shapes = [tuple(o.shape) for o in outputs]
+            if len(outputs) == 1 and len(shapes[0]) == 3:
+                kind = "v8"
+            elif len(outputs) >= 3 and all(len(s) == 4 for s in shapes):
+                kind = "v5"
+            elif len(outputs) == 6:
+                raise NotImplementedError(
+                    "这个模型导出的是未做 DFL 解码的 6 输出头 %s；"
+                    "请在导出 .rknn 时打开 DFL 解码（rknn_model_zoo 的 "
+                    "YOLOv8 导出脚本默认会解码），或改用单头模型" % (shapes,)
+                )
+            else:
+                raise ValueError(
+                    "认不出模型输出布局 %s；用 head='v5' / head='v8' 显式指定"
+                    % (shapes,)
+                )
+        self.head_kind = kind
+        return kind
+
+    # -- v5 系解码 -----------------------------------------------------
+    def _post_process_v5(self, outputs):
+        if not self.anchors:
+            raise ValueError("v5 系模型需要 anchors，请给 anchors= 文件路径或列表")
+
+        all_boxes, all_classes, all_scores = [], [], []
+
+        for level, out in enumerate(outputs):
+            data = self._as_chw(out, "v5 尺度头 %d" % level)
+            if level >= len(self.anchors):
+                raise ValueError(
+                    "模型有 %d 个输出头，但只给了 %d 组 anchors"
+                    % (len(outputs), len(self.anchors))
+                )
+            anchors = np.asarray(self.anchors[level], dtype=np.float32)
+            n_anchor = anchors.shape[0]
+            if data.shape[0] % n_anchor != 0:
+                raise ValueError(
+                    "尺度 %d 的通道数 %d 不能被 anchor 数 %d 整除"
+                    % (level, data.shape[0], n_anchor)
+                )
+            channels = data.shape[0] // n_anchor
+            n_classes = channels - 5
+            if n_classes < 1:
+                raise ValueError("尺度 %d 的通道数 %d 太少，不像 YOLO 头"
+                                 % (level, data.shape[0]))
+            self._remember_classes(n_classes)
+
+            grid_h, grid_w = data.shape[1], data.shape[2]
+            data = data.reshape(n_anchor, channels, grid_h, grid_w)
+
+            # sigmoid 约定**每个尺度头判定一次**（只看 objectness 通道），
+            # 判定结果对这个头的所有元素一致生效 —— 否则同一个头里
+            # "objectness 走原值、类别走 sigmoid"这种混搭会静默出错。
+            sig = self._sigmoid_for(data)
+
+            # 只按 objectness 过滤：conf = class_max * obj <= obj，
+            # 所以不会漏掉任何最终能过阈值的候选。
+            objectness = sig(data[:, 4, :, :])
+            a_idx, i_idx, j_idx = np.nonzero(objectness >= self.conf_thres)
+            if a_idx.size == 0:
+                continue
+
+            probs = sig(data[a_idx, :, i_idx, j_idx])          # (K, channels)
+            class_probs = probs[:, 5:]
+            class_max = class_probs.max(axis=1)
+            class_id = class_probs.argmax(axis=1)
+            conf = class_max * probs[:, 4]
+
+            keep = conf >= self.conf_thres
+            if not keep.any():
+                continue
+            probs, class_id, conf = probs[keep], class_id[keep], conf[keep]
+            a_k, i_k, j_k = a_idx[keep], i_idx[keep], j_idx[keep]
+
+            stride_w = float(self.img_size[0]) / grid_w
+            stride_h = float(self.img_size[1]) / grid_h
+            anchor_wh = anchors[a_k]
+
+            cx = (probs[:, 0] * 2.0 - 0.5 + j_k) * stride_w
+            cy = (probs[:, 1] * 2.0 - 0.5 + i_k) * stride_h
+            bw = np.power(probs[:, 2] * 2.0, 2) * anchor_wh[:, 0]
+            bh = np.power(probs[:, 3] * 2.0, 2) * anchor_wh[:, 1]
+
+            all_boxes.append(np.stack([cx - bw / 2.0, cy - bh / 2.0,
+                                       cx + bw / 2.0, cy + bh / 2.0], axis=1))
+            all_classes.append(class_id.astype(np.int64))
+            all_scores.append(conf)
+
+        if not all_boxes:
+            return None, None, None
+        return self._nms_per_class(np.concatenate(all_boxes),
+                                   np.concatenate(all_classes),
+                                   np.concatenate(all_scores))
+
+    # -- v8 系解码 -----------------------------------------------------
+    def _post_process_v8(self, outputs):
+        if len(outputs) != 1:
+            raise NotImplementedError(
+                "v8 系只支持单头输出，实际有 %d 个头" % len(outputs)
+            )
+        pred = self._as_head_matrix(outputs[0], "v8 头")
+        if pred.ndim != 2:
+            raise ValueError("v8 头期望 2 维 (4+nc, N)，实际 %s" % (pred.shape,))
+        if pred.shape[0] > pred.shape[1]:
+            pred = pred.T                       # (N, 4+nc) → (4+nc, N)
+        n_classes = pred.shape[0] - 4
+        if n_classes < 1:
+            raise ValueError("v8 头通道数 %d 太少" % pred.shape[0])
+        self._remember_classes(n_classes)
+
+        xywh = pred[:4].T                       # (N, 4)，输入图像像素
+        scores = pred[4:].T                     # (N, nc)
+        if self.sigmoid == "on":
+            scores = 1.0 / (1.0 + np.exp(-scores))
+        elif self.sigmoid == "auto" and (scores.min() < -0.01 or scores.max() > 1.01):
+            scores = 1.0 / (1.0 + np.exp(-scores))
+
+        class_id = scores.argmax(axis=1)
+        conf = scores[np.arange(scores.shape[0]), class_id]
+        keep = conf >= self.conf_thres
+        if not keep.any():
+            return None, None, None
+        xywh, class_id, conf = xywh[keep], class_id[keep], conf[keep]
+
+        cx, cy, bw, bh = xywh[:, 0], xywh[:, 1], xywh[:, 2], xywh[:, 3]
+        boxes = np.stack([cx - bw / 2.0, cy - bh / 2.0,
+                          cx + bw / 2.0, cy + bh / 2.0], axis=1)
+        return self._nms_per_class(boxes, class_id.astype(np.int64), conf)
+
+    # -- 公共小工具 ----------------------------------------------------
+    def _sigmoid_for(self, head):
+        """决定这个尺度头要不要补 sigmoid，返回对应的逐元素函数。
+
+        只看 objectness 通道（几万个值）而不是整个头（几十万个值）；
+        阈值取 [-0.01, 1.01]：概率一定落在这个区间内，日志值几乎不会。
+        """
+        if self.sigmoid == "on":
+            apply = True
+        elif self.sigmoid == "off":
+            apply = False
+        else:
+            obj = head[:, 4, :, :]
+            apply = bool(obj.min() < -0.01 or obj.max() > 1.01)
+        if apply:
+            return lambda x: 1.0 / (1.0 + np.exp(-x))
+        return lambda x: x
+
+    def _remember_classes(self, n_classes):
+        if self.num_classes is None:
+            self.num_classes = n_classes
+        elif self.num_classes != n_classes:
+            raise ValueError("各输出头的类别数不一致: %d vs %d"
+                             % (self.num_classes, n_classes))
+        if self.labels and len(self.labels) != n_classes and self.verbose:
+            print("rknn_yolo: 警告 标签数 %d 与模型类别数 %d 不一致"
+                  % (len(self.labels), n_classes))
+
+    @staticmethod
+    def _as_chw(out, what):
+        """去掉 batch 维：``(1, C, H, W) -> (C, H, W)``；已经是低维就原样返回。"""
+        if out.ndim == 4:
+            if out.shape[0] != 1:
+                raise ValueError("%s 期望 batch=1，实际 %s" % (what, out.shape))
+            return out[0]
+        if out.ndim in (2, 3):
+            return out
+        raise ValueError("%s 的维度不支持: %s" % (what, out.shape))
+
+    @staticmethod
+    def _as_head_matrix(out, what):
+        """v8 头是 ``(1, 4+nc, N)``：去掉 batch 维，得到 2 维矩阵。
+
+        不能和 :meth:`_as_chw` 共用 —— 那边的 3 维表示"(C, H, W) 无 batch"，
+        这边的 3 维表示"(1, C, N) 有 batch"，同一个形状两种含义。
+        """
+        if out.ndim == 3:
+            if out.shape[0] != 1:
+                raise ValueError("%s 期望 batch=1，实际 %s" % (what, out.shape))
+            return out[0]
+        if out.ndim == 2:
+            return out
+        raise ValueError("%s 期望 (1, 4+nc, N) / (4+nc, N)，实际 %s" % (what, out.shape))
+
+    def _nms_per_class(self, boxes, classes, scores):
+        keep_boxes, keep_classes, keep_scores = [], [], []
+        for cls in np.unique(classes):
+            idx = np.where(classes == cls)[0]
+            keep = self._nms_boxes(boxes[idx], scores[idx])
+            if keep.size:
+                keep_boxes.append(boxes[idx][keep])
+                keep_classes.append(classes[idx][keep])
+                keep_scores.append(scores[idx][keep])
+        if not keep_boxes:
+            return None, None, None
+        return (np.concatenate(keep_boxes),
+                np.concatenate(keep_classes),
+                np.concatenate(keep_scores))
+
+    def _nms_boxes(self, boxes, scores):
+        """标准 IoU NMS；boxes 为 xyxy。"""
+        x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+        areas = (x2 - x1) * (y2 - y1)
+        order = scores.argsort()[::-1]
+        keep = []
+        while order.size > 0:
+            current = order[0]
+            keep.append(current)
+            rest = order[1:]
+            if rest.size == 0:
+                break
+            xx1 = np.maximum(x1[current], x1[rest])
+            yy1 = np.maximum(y1[current], y1[rest])
+            xx2 = np.minimum(x2[current], x2[rest])
+            yy2 = np.minimum(y2[current], y2[rest])
+            inter = np.maximum(0.0, xx2 - xx1) * np.maximum(0.0, yy2 - yy1)
+            union = areas[current] + areas[rest] - inter
+            iou = np.where(union > 0, inter / np.maximum(union, 1e-12), 0.0)
+            order = rest[iou <= self.nms_thres]
+        return np.asarray(keep, dtype=np.int64)
+
+    # -- 收尾 ----------------------------------------------------------
+    def release(self):
+        if self._rknn is not None:
+            self._rknn.release()
+
+    def __del__(self):
+        try:
+            self.release()
+        except Exception:
+            pass
+
+
+def draw_detections(image, detections, font_scale=0.6, thickness=2):
+    """原地画框与标签，返回同一张图（BGR）。"""
+    for det in detections:
+        cv2.rectangle(image, (det.x1, det.y1), (det.x2, det.y2), (255, 0, 0), thickness)
+        cv2.putText(image, "%s %.2f" % (det.label, det.score),
+                    (det.x1, max(12, det.y1 - 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), thickness)
+    return image
+
+
+# ------------------------------------------------------------------ 自测入口 ----
+
+def _main(argv):
+    import argparse
+    parser = argparse.ArgumentParser(description="rknn_yolo 单文件自测（板上跑）")
+    parser.add_argument("model")
+    parser.add_argument("image")
+    parser.add_argument("--labels", default=None)
+    parser.add_argument("--anchors", default=None)
+    parser.add_argument("--lib", default=None)
+    parser.add_argument("--conf", type=float, default=0.25)
+    parser.add_argument("--nms", type=float, default=0.45)
+    parser.add_argument("--core-mask", default="0_1_2")
+    parser.add_argument("--head", default="auto", choices=["auto", "v5", "v8"])
+    parser.add_argument("--repeat", type=int, default=1,
+                        help="重复推理次数，>1 时打印端到端 FPS")
+    args = parser.parse_args(argv)
+
+    detector = RknnYoloDetector(
+        args.model, labels=args.labels, anchors=args.anchors, lib_path=args.lib,
+        conf_thres=args.conf, nms_thres=args.nms, core_mask=args.core_mask,
+        head=args.head, verbose=True,
+    )
+    print("detector: %s" % detector.describe())
+
+    image = cv2.imread(args.image)
+    if image is None:
+        raise SystemExit("读不到图片: %s" % args.image)
+
+    started = time.time()
+    detections = []
+    for _ in range(max(1, args.repeat)):
+        detections = detector.infer(image)
+    elapsed = time.time() - started
+
+    for det in detections:
+        print("  %-14s %.3f  [%d, %d, %d, %d]"
+              % (det.label, det.score, det.x1, det.y1, det.x2, det.y2))
+    print("检出 %d 个目标；NPU 调用 %.1f ms，后处理 %.1f ms，端到端 %.1f ms (%.1f FPS)"
+          % (len(detections), detector.last_infer_ms, detector.last_post_ms,
+             elapsed / max(1, args.repeat) * 1000.0,
+             max(1, args.repeat) / elapsed if elapsed > 0 else 0.0))
+    detector.release()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_main(sys.argv[1:]))
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\lib\semi_auto_match_24\roi_map.py ===
+
+"""兴趣区（ROI）与整幅图像坐标之间的换算 —— 本赛项的坐标契约。
+
+为什么单独一个模块
+------------------
+机械臂标定文件 ``thefile.txt`` 给出的是**整幅图像像素坐标**到机械臂坐标的线性映射
+（``pos.x = x_kb[0] * 像素x + x_kb[1]``，y 同理）。而检测器只看画面里的一小块
+兴趣区，所以每一条发出去的 ``LocationCentre`` 都必须把"ROI 内的框中心"换算回
+"整幅图像坐标"。
+
+这层换算是纯数学、与 ROS 无关，但错了不会报错、只会让机械臂少走或多走几厘米。
+所以把它从节点里拆出来：只依赖标准库，可以在任何地方单独跑
+（见 ``test/test_rknn_yolo_postprocess.py``），不需要 numpy / cv2 / NPU。
+
+与原程序的对应关系
+------------------
+原 ``scripts/detect.py`` 写的是::
+
+    image = image[160:480, 160:480]                     # ROI 320×320，原点 (160, 160)
+    loc_x = int((x_min + x_max) * 320 / 2 + 0.25 * 640) # 0.25*640 = 160  == ROI 原点 x
+    loc_y = int((y_min + y_max) * 320 / 2 + 0.33 * 480) # 0.33*480 = 158.4 != ROI 原点 y(160)
+
+x 方向的偏移正好是 ROI 原点，y 方向则比真实裁剪原点少 1.6 px。本模块按**真实裁剪
+原点**换算；要逐像素复现原程序，把偏移显式设成 ``[160, 158.4]`` 即可。
+"""
+
+__all__ = ["parse_roi", "parse_offset", "centre_to_source", "crop_slice"]
+
+
+def parse_roi(value):
+    """``~roi`` → ``(x, y, w, h)``，单位像素，必须是 4 个整数。"""
+    try:
+        roi = [int(v) for v in value]
+    except (TypeError, ValueError):
+        raise ValueError("roi 必须是 4 个整数 (x, y, w, h)，收到 %r" % (value,))
+    if len(roi) != 4:
+        raise ValueError("roi 必须是 4 个整数 (x, y, w, h)，收到 %r" % (value,))
+    if roi[2] <= 0 or roi[3] <= 0:
+        raise ValueError("roi 的宽高必须为正，收到 %r" % (value,))
+    return tuple(roi)
+
+
+def parse_offset(value, roi):
+    """``~roi_offset`` → ``(dx, dy)``；留空时用 ROI 左上角。
+
+    允许小数：原程序 y 方向的 158.4 就是这么复现的。
+    """
+    if value in (None, "", [], ()):
+        return (float(roi[0]), float(roi[1]))
+    try:
+        offset = [float(v) for v in value]
+    except (TypeError, ValueError):
+        raise ValueError("roi_offset 必须是 2 个数 (dx, dy)，收到 %r" % (value,))
+    if len(offset) != 2:
+        raise ValueError("roi_offset 必须是 2 个数 (dx, dy)，收到 %r" % (value,))
+    return (offset[0], offset[1])
+
+
+def centre_to_source(x1, y1, x2, y2, offset):
+    """ROI 内的框（xyxy，像素）→ 整幅图像里的中心点，取整方式与原程序一致。
+
+    原程序是 ``int(中心 + 偏移)`` —— 先加再截断，不是先各自取整。
+    """
+    cx = int(offset[0] + (x1 + x2) / 2.0)
+    cy = int(offset[1] + (y1 + y2) / 2.0)
+    return cx, cy
+
+
+def crop_slice(shape, roi):
+    """按 ``roi`` 算出裁剪用的切片；画面装不下就返回 ``None``（不猜、不补边）。
+
+    :param shape: ``image.shape``（至少两维，前两维是 h, w）
+    """
+    height, width = shape[0], shape[1]
+    x, y, w, h = roi
+    if width < x + w or height < y + h:
+        return None
+    return (slice(y, y + h), slice(x, x + w))
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\lib\semi_auto_match_24\teleop.py ===
+
+#!/usr/bin/env python3.12
+# -*- coding: utf-8 -*-
+
+import os
+import sys
+import tty
+import termios
+import roslib
+import rospy
+from geometry_msgs.msg import Twist
+from std_msgs.msg import String
+
+# 全局变量（在 keyboardLoop 里 init_node 之后才真正建 Publisher）
+cmd = Twist()
+pub = None
+grasp_pub = None
+
+
+def keyboardLoop():
+    global pub, grasp_pub
+
+    rospy.init_node('teleop')
+
+    if not sys.stdin.isatty():
+        rospy.logfatal(
+            "teleop 需要真终端（要 termios 读单键）。板端没有终端模拟器，"
+            "被 roslaunch 拉起时 stdin 是 EOF —— 请在 MobaXterm 里另开窗口跑："
+            "run rosrun semi_auto_match_24 teleop.py")
+        return 1
+
+    pub = rospy.Publisher('cmd_vel', Twist, queue_size=1)
+    grasp_pub = rospy.Publisher('/grasp', String, queue_size=1)
+
+    #初始化监听键盘按钮时间间隔
+    rate = rospy.Rate(rospy.get_param('~hz', 10))
+ 
+    #速度变量
+    # 慢速
+    walk_vel_ = rospy.get_param('walk_vel', 0.1)
+    # 快速
+    run_vel_ = rospy.get_param('run_vel', 0.5)
+    yaw_rate_ = rospy.get_param('yaw_rate', 0.5)
+    yaw_rate_run_ = rospy.get_param('yaw_rate_run', 1.0)
+    # walk_vel_前后速度
+    max_tv = walk_vel_
+    # yaw_rate_旋转速度
+    max_rv = yaw_rate_
+    # 参数初始化
+    speed=0
+
+    print ("使用[WASD]控制机器人")
+    print ("按[T]抓取物体")
+    print ("按[G]抓取水源")
+    print ("按[H]放下物体")
+    print ("按[Q]退出" )
+ 
+    #读取按键循环
+    while not rospy.is_shutdown():
+        # linux下读取键盘按键
+        fd = sys.stdin.fileno()
+        turn =0
+        old_settings = termios.tcgetattr(fd)
+        #不产生回显效果
+        old_settings[3] = old_settings[3] & ~termios.ICANON & ~termios.ECHO
+        try :
+            tty.setraw( fd )
+            ch = sys.stdin.read( 1 )
+        finally :
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        # ch代表获取的键盘按键
+        if ch == 'g':
+            msg=String()
+            msg.data='0'
+            grasp_pub.publish(msg)
+            speed = 0
+            turn = 0
+        elif ch == 't':
+            msg=String()
+            msg.data='4'
+            grasp_pub.publish(msg)
+            speed = 0
+            turn = 0
+        elif ch == 'G':
+            msg=String()
+            msg.data='10'
+            grasp_pub.publish(msg)
+            speed = 0
+            turn = 0
+        elif ch == 'T':
+            msg=String()
+            msg.data='11'
+            grasp_pub.publish(msg)
+            speed = 0
+            turn = 0
+
+        elif ch == 'h':
+            msg=String()
+            msg.data='1'
+            grasp_pub.publish(msg)
+            speed = 0
+            turn = 0
+        elif ch == 'w':
+            max_tv = walk_vel_
+            speed = 1
+            turn = 0
+        elif ch == 's':
+            max_tv = walk_vel_
+            speed = -1
+            turn = 0
+        elif ch == 'a':
+            max_rv = yaw_rate_
+            speed = 0
+            turn = 1
+        elif ch == 'd':
+            max_rv = yaw_rate_
+            speed = 0
+            turn = -1
+        elif ch == 'W':
+            max_tv = run_vel_
+            speed = 1
+            turn = 0
+        elif ch == 'S':
+            max_tv = run_vel_
+            speed = -1
+            turn = 0
+        elif ch == 'A':
+            max_rv = yaw_rate_run_
+            speed = 0
+            turn = 1
+        elif ch == 'D':
+            max_rv = yaw_rate_run_
+            speed = 0
+            turn = -1
+        elif ch == 'q':
+            sys.exit(0)
+        else:
+            max_tv = walk_vel_
+            max_rv = yaw_rate_
+            speed = 0
+            turn = 0
+
+        #发送消息
+        cmd.linear.x = speed * max_tv
+        cmd.angular.z = turn * max_rv
+        pub.publish(cmd)
+        rate.sleep()
+    return 0
+
+
+def stop_robot():
+    cmd.linear.x = 0.0
+    cmd.angular.z = 0.0
+    if pub is not None:
+        pub.publish(cmd)
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(keyboardLoop())
+    except rospy.ROSInterruptException:
+        pass
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\share\semi_auto_match_24\config\grasp_colors.yaml ===
+
+# grasp.py 的颜色阈值
+
+# 水源（蓝）。原
+water:
+  lower: [95, 90, 80]
+  upper: [130, 255, 255]
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\share\semi_auto_match_24\config\grasp_heights.yaml ===
+
+# grasp.py 的抓取高度 —— 
+#
+# 单位是 **毫米**：swiftpro 的 position.z 直接拼成 Gcode "G0 X.. Y.. Z.."，
+z_up: 20
+z_down: -45
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\share\semi_auto_match_24\config\yolo\anchors_yolov5.txt ===
+
+# YOLOv5 系列 anchor（rknn_model_zoo 的 anchors_yolov5.txt 格式：每行一个数，
+# 共 18 个 = 3 个尺度 × 3 个 anchor × (w, h)，单位是输入图像的像素）。
+# 换模型（换尺度/换 anchor 配置）时必须同步换这个文件。
+
+10.0
+13.0
+16.0
+30.0
+33.0
+23.0
+30.0
+61.0
+62.0
+45.0
+59.0
+119.0
+116.0
+90.0
+156.0
+198.0
+373.0
+326.0
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\share\semi_auto_match_24\config\yolo\coco_labels.txt ===
+
+# COCO-80 类别表：模型类别下标 / 对外 id / 名称
+#
+# 第 2 列是 tensorflow_object_detector 那份 mscoco_label_map.pbtxt 的编号，
+# 也就是 config/items_config.yaml 里用的编号（clock=85、teddy bear=88、
+# wine glass=46 ...）。RKNN 的 YOLO 模型输出的是第 1 列（COCO-80 下标），
+# detect_rknn.py 按这张表换算，老配置因此不用改。
+#
+# 列：<模型类别下标> <对外 id> <名称>
+# 名称取 TF 的 display_name（用于 debug_image 上的文字）。
+
+0   1   person
+1   2   bicycle
+2   3   car
+3   4   motorcycle
+4   5   airplane
+5   6   bus
+6   7   train
+7   8   truck
+8   9   boat
+9   10  traffic light
+10  11  fire hydrant
+11  13  stop sign
+12  14  parking meter
+13  15  bench
+14  16  bird
+15  17  cat
+16  18  dog
+17  19  horse
+18  20  sheep
+19  21  cow
+20  22  elephant
+21  23  bear
+22  24  zebra
+23  25  giraffe
+24  27  backpack
+25  28  umbrella
+26  31  handbag
+27  32  tie
+28  33  suitcase
+29  34  frisbee
+30  35  skis
+31  36  snowboard
+32  37  sports ball
+33  38  kite
+34  39  baseball bat
+35  40  baseball glove
+36  41  skateboard
+37  42  surfboard
+38  43  tennis racket
+39  44  bottle
+40  46  wine glass
+41  47  cup
+42  48  fork
+43  49  knife
+44  50  spoon
+45  51  bowl
+46  52  banana
+47  53  apple
+48  54  sandwich
+49  55  orange
+50  56  broccoli
+51  57  carrot
+52  58  hot dog
+53  59  pizza
+54  60  donut
+55  61  cake
+56  62  chair
+57  63  couch
+58  64  potted plant
+59  65  bed
+60  67  dining table
+61  70  toilet
+62  72  tv
+63  73  laptop
+64  74  mouse
+65  75  remote
+66  76  keyboard
+67  77  cell phone
+68  78  microwave
+69  79  oven
+70  80  toaster
+71  81  sink
+72  82  refrigerator
+73  84  book
+74  85  clock
+75  86  vase
+76  87  scissors
+77  88  teddy bear
+78  89  hair drier
+79  90  toothbrush
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\share\semi_auto_match_24\config\yolo\detect_rknn.yaml ===
+
+# detect_rknn.py 的默认参数。
+# roslaunch 里用 <rosparam command="load" .../> 挂到节点私有命名空间；
+# 单跑时可以直接覆盖：run rosrun semi_auto_match_24 detect_rknn.py _conf_thres:=0.4
+
+# --- 模型与运行时（换板子 / 换模型改这里）---
+# 官方 rknn_model_zoo 的默认 YOLOv5 模型（COCO 80 类，640×640 输入）。
+# 板上随镜像部署，路径与本板厂商件一致。
+model_path: /data/local/release/rknn-demo/model/yolov5s-640-640.rknn
+lib_path: /data/local/release/rknn-demo/lib/librknnrt.so
+
+# 留空 => 用 semi_auto_match_24/config/yolo/ 下的同名文件
+labels_path: ""
+anchors_path: ""
+
+# --- 输入与阈值 ---
+# (宽, 高)。留空（""）则由模型输入属性自动推断，适用于任何输入尺寸的模型。
+img_size: [640, 640]
+# 原版 TensorFlow 那条链的可视化阈值是 0.2；这里默认沿用 0.25（rknn_model_zoo 的
+# YOLOv5 demo 默认值）。识别不稳时先调这个，不用改代码。
+conf_thres: 0.25
+nms_thres: 0.45
+max_det: 100
+
+# --- 兴趣区 ---
+# 原程序只把 640×480 画面里的 image[160:480, 160:480] 送进模型，
+# 再把框中心换算回整幅图像坐标（机械臂标定 thefile.txt 是整幅图像坐标系）。
+# roi = (x, y, w, h)，单位像素；换成别的相机分辨率时按需改。
+roi: [160, 160, 320, 320]
+# roi_offset = 把 ROI 内坐标换算回整幅图像坐标时加的偏移；留空 => 用 roi 左上角。
+# 原版写死的是 x:+160（=0.25*640）、y:+158.4（=0.33*480），要逐像素复现原版就写
+# [160, 158.4]；默认用真实裁剪原点 [160, 160]，差 1.6 px。
+roi_offset: []
+
+# --- 性能 ---
+# RK3588 有三个 NPU 核。不给 mask 时运行时只用 core0，
+# 表现为 Core1/Core2 占用率恒为 0（不是故障，是没给它派活）。
+core_mask: "0_1_2"
+
+# --- 模型头约定（一般不用动）---
+head: auto            # auto | v5 | v8
+sigmoid: auto         # auto | on | off；只影响 v5 系解码
+
+# --- 对外接口 ---
+# true  => 类别 id 按 config/yolo/coco_labels.txt 换算成原程序用的
+#          TF 90 类编号（西兰花=56、wine glass=46），grasp.py 不用改。
+publish_tf_ids: true
+publish_debug_image: true
+verbose: false
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\share\semi_auto_match_24\docs\RKNN_MIGRATION.md ===
+
+# 2024 半自动任务赛程序 · OpenHarmony 交叉编译适配说明
+
+> 目标板：KaiHong RK3588 / OpenHarmony（musl + OHOS ABI）
+> 工具链：`spark-cross`（chroot + catkin_tools + DESTDIR 装到 `install/usr`）
+> 本次范围：**交叉编译适配 + 把模型推理换成 RK3588 NPU 上的 YOLOv5**。
+> 板端真机验证另做，见文末清单。
+
+---
+
+## 1. 原程序与适配后的对应关系
+
+原 zip：`spark_noetic/src/3rd_app/semi_auto_match_24-master.zip`
+（`semi_auto_match_24-master/semi_auto_match_24/` + 根目录一个 `LocationCentre.msg`）
+
+| 原文件 | 适配后 | 说明 |
+|---|---|---|
+| `scripts/detect.py` | **删除**，换成 `nodes/detect_rknn.py` | TensorFlow SSD MobileNet → RKNN YOLOv5 |
+| `scripts/grasp.py` | `nodes/grasp.py` | 抓放算法不变，只修板上会挂的地方 |
+| `scripts/teleop.py` | `nodes/teleop.py` | 按键映射不变 |
+| `LocationCentre.msg`（zip 根目录） | `msg/LocationCentre.msg` | 收进包里，成为本包自己的消息 |
+| `CMakeLists.txt`（全注释） | 重写 | 原来一行 install 都没有 → 编了也没产物 |
+| `package.xml`（无依赖） | 重写 | 依赖真源，见 §3 |
+| `launch/semi_auto.launch` | 重写 | 去掉 xterm、修 rviz、teleop 改手动 |
+| `rviz/*.rviz` | 原样保留 + 新增 `semi_auto.rviz` | 原来指向 skiplist 包里的布局 |
+| — | `nodes/rknn_yolo.py`、`python/rknn/` | 复用 2026 版已验证过的 NPU 侧代码 |
+| — | `nodes/roi_map.py` | ROI ↔ 整幅图像坐标换算，单独可测 |
+| — | `config/yolo/`、`launch/detect_rknn.launch` | 检测参数与标签表 |
+| — | `test/test_rknn_yolo_postprocess.py` | 解码/NMS/坐标契约回归测试 |
+
+原 zip 里的 `scripts/.idea/`、`scripts/.vscode/`（IDE 配置）没有搬过来。
+
+---
+
+## 2. 推理：TensorFlow SSD → RKNN YOLOv5
+
+**为什么必须换**：板上装不了 TensorFlow，`object_detection` / `mscoco_label_map.pbtxt` /
+`frozen_inference_graph.pb` 都不在镜像里；而 RK3588 有 NPU，厂商随镜像提供了
+`librknnrt.so` 与官方 `rknn_model_zoo` 的默认 YOLOv5 模型。
+
+**怎么换**：
+
+* 推理运行时 = `librknnrt.so` 的 ctypes 兼容层（`python/rknn/api.py`）。
+  板上是 musl，PyPI 的 `rknn-toolkit-lite2` 只有 glibc 轮子，pip 装不上；
+  C ABI 稳定，用 ctypes 直连是唯一可行路径。
+* YOLOv5 解码 + NMS = `nodes/rknn_yolo.py`（v5 三尺度头、anchor、先过滤后解码、按类 NMS）。
+* 模型 = 官方默认 `yolov5s-640-640.rknn`（COCO 80 类），
+  路径 `/data/local/release/rknn-demo/model/yolov5s-640-640.rknn`，
+  可用 `~model_path` 覆盖（`config/yolo/detect_rknn.yaml` 或 `model_path:=...`）。
+
+**对外接口一字未改**，所以 `grasp.py` 与 launch 都不用跟着动：
+
+| 方向 | 话题 | 类型 |
+|---|---|---|
+| 订阅 | `image` | `sensor_msgs/Image`（launch 里 remap 到相机话题） |
+| 发布 | `location` | `semi_auto_match_24/LocationCentre` |
+| 发布 | `debug_image` | `sensor_msgs/Image` |
+
+---
+
+## 3. 两处**必须**说清楚的语义契约
+
+这两处错了都不会报错，只会"抓不到"或"抓偏"，所以单独写出来，并各有一条回归测试。
+
+### 3.1 类别 id：西兰花必须还是 56
+
+`grasp.py` 里判断西兰花是 `loc.obj_id == 56`。这个 56 是
+`tensorflow_object_detector` 那份 `mscoco_label_map.pbtxt` 的 **90 类编号**
+（中间有 12 个空洞）。而 YOLOv5 输出的是 **COCO-80 下标**，西兰花是 **50**。
+
+直接发模型下标 → `grasp.py` 的西兰花分支永远不触发，且没有任何报错。
+
+处理：`config/yolo/coco_labels.txt` 是三列格式 `模型下标 外部id 名字`，
+`detect_rknn.py` 默认（`publish_tf_ids: true`）按它把 50 换算成 56 再发。
+`test/test_rknn_yolo_postprocess.py::test_grasp_id_contract` 钉住这条契约。
+
+> 换模型/换类别表时注意：映射表必须是 80 行、下标连续。
+
+### 3.2 坐标：ROI 内坐标 → 整幅图像坐标
+
+原程序只把 640×480 里的 `image[160:480, 160:480]`（320×320）送进模型，
+再把框中心换算回**整幅图像坐标**发出去 —— 因为机械臂标定文件 `thefile.txt`
+是整幅图像坐标系下的线性映射。
+
+原版写法与本次实现的差别：
+
+| | 原 `detect.py` | 本次实现（默认） |
+|---|---|---|
+| x 偏移 | `0.25 * 640 = 160` | `roi` 左上角 = 160 |
+| y 偏移 | `0.33 * 480 = 158.4` | `roi` 左上角 = 160 |
+
+**x 方向逐像素一致；y 方向默认比原版大 1.6 px。** 原版的 0.33×480 显然是想表达
+裁剪原点 160，只是用了近似系数。要**逐像素复现原版**（例如沿用旧的标定文件），
+把参数设成：
+
+```yaml
+roi: [160, 160, 320, 320]
+roi_offset: [160, 158.4]     # 留空 [] 则用 roi 左上角 (160, 160)
+```
+
+`test_roi_mapping_matches_original` 同时钉住了"x 一致"、"默认 y 差 1.6 px"、
+"显式 158.4 时 y 也一致"三件事。
+
+---
+
+## 4. 板端会直接挂掉、必须改的地方
+
+| 症状 | 原因 | 处理 |
+|---|---|---|
+| 节点 import 就死 | `from vision_msgs.msg import ... LocationCentre` —— `vision_msgs` 里没有这个消息（它在原 zip 根目录，属于本包） | 改 `from semi_auto_match_24.msg import LocationCentre` |
+| import 不到机械臂消息 | 原文件 `from swiftpro.msg import *`，而 `swiftpro` 在 `build.sh` 的 skiplist 里 | 优先 `spark_carry_object.msg`（本工具链会编），取不到才退回 `swiftpro`。两者 `position`/`status` 字段定义逐字节一致 |
+| teleop 起不来 | `launch-prefix="xterm -e"`，板上没有终端模拟器 | 去掉前缀，并默认**不自动拉起**（交互式节点要真 tty，请另开窗口 `run rosrun semi_auto_match_24 teleop.py`） |
+| rviz 起不来 | 原布局来自 `tensorflow_object_detector`（skiplist 包，板上没有） | 用本包自带的 `rviz/semi_auto.rviz`；rviz 加 `launch-prefix="run_gui"` 拿 GL 上下文 |
+| **rviz 3D 画面空白/发白，什么都不画** | 布局的 **Fixed Frame** 是不是本 launch 真有的帧 | 见 §4.1：抄 SLAM 布局会把 Fixed Frame 抄成 `map`，而本 launch 不起 SLAM |
+| grasp 节点抛异常 | `cv2.imshow` 无条件调用，板上没有 GL 上下文 | 由 `~show_debug` 控制（默认关）；开启时 launch 自动套 `run_gui`；画图失败只警告一次 |
+| 轮廓为空时崩 | `cv2.drawContours(img, [], 0, ...)` 断言失败 | 加空判断 |
+| numpy 2.x 下崩 | `np.int0` 已被移除 | 换等价的 `np.intp` |
+| teleop 静默失效 | 模块顶层就建 `rospy.Publisher`，而 `init_node` 在函数里才调 | Publisher 挪到 `init_node` 之后；并加 `isatty()` 前置检查，不是终端就明确报错 |
+| 编了没产物 | 原 `CMakeLists.txt` 的 install 段全被注释 | 重写：消息生成 + `catkin_install_python` + `install(DIRECTORY ...)` |
+
+---
+
+### 4.1 rviz 的 Fixed Frame：别抄 SLAM 布局
+
+**症状**：VNC 里 rviz 起来了、OpenGL 也正常（`OpenGL device: Mali-G610 (Panfrost)`），
+但 3D 画面空白 / 模型发白，什么都画不出来。
+
+**根因**：rviz 的 **Fixed Frame** 必须是一个**本 launch 真的会发布**的 TF 帧，
+否则它在状态栏报 `Fixed Frame [xxx] does not exist`，然后整块 3D 视图什么都不画。
+
+本 launch 实际存在的帧（板端 `rostopic info /tf` + `rostopic echo /tf` 实测）：
+
+| 帧 | 谁发 | 本 launch 有没有 |
+|---|---|---|
+| `odom` | `spark_base_server`（发 `odom → base_footprint`） | **有** |
+| `base_link` | `robot_state_publisher` | 有 |
+| `camera_link` / `camera_*` | `realsense2_camera`（静态） | 有 |
+| `laser` | `robot_state_publisher`（URDF 里的固定关节） | 有 |
+| **`map`** | SLAM / `map_server` | **没有** —— 本 launch 不起 SLAM |
+
+一开始我直接抄了 `spark_gmapping_d435.rviz`（它是**建图**布局，Fixed Frame = `map`），
+所以上板就白屏。`auto_match.rviz`（2026 版）也是 `map` 中心，但**它的 launch 会起
+SLAM 或 map_server**，所以那份没问题、抄过来就有问题。
+
+**现在的做法**：`rviz/semi_auto.rviz` 以官方的
+`spark_description/rviz/urdf.rviz` 为底 —— 那份是"看机器人"布局，Fixed Frame 就是
+`odom`，且恰好配对 `joint_state_publisher` + `robot_state_publisher` 这一对节点；
+再把 PointCloud2 面板换成雷达 + 两路图像（LaserScan/Image 的字段块直接从
+`auto_match.rviz` 整块搬，同板同 rviz 版本，schema 一定对）：
+
+```
+Grid / RobotModel / TF(关) / LaserScan(/scan)
+/ Image(/camera/color/image_raw) / Image(/debug_image)      Fixed Frame: odom
+```
+
+**视角与窗口也一起调了**（官方 `urdf.rviz` 存的是 Distance 6.64 m、窗口 1859×1056）：
+
+| 项 | 原值 | 改成 | 为什么 |
+|---|---|---|---|
+| `Target Frame` | `<Fixed Frame>`（= odom 原点） | `base_link` | 相机跟着机器人走；盯 odom 原点的话，车一开走就不在画面里了 |
+| `Distance` | 6.64 m | 2.5 m | 底盘只有 34 cm，6.6 m 外只剩一个小点 |
+| 窗口尺寸 | 1859×1056 | 1100×650 | 板上 Xvfb 就是 1100×650；尺寸不匹配时 Qt 按旧布局摆面板，机器人会被挤到画面角落 |
+
+生成脚本 `test/gen_rviz.py` 一次搞定，要改帧或视角直接改脚本里的 `VIEW_FIXES` 重跑，
+或者在 rviz 里 `Global Options → Fixed Frame` 改完 `File → Save Config As` 覆盖。
+
+---
+
+## 5. 刻意**没有**改的行为
+
+原程序里的这些写法看着奇怪，但它们直接影响标定基准或比赛策略，改动属于另一件事，
+本次一律保留（只在代码注释里标出来）：
+
+* `image_cb` 与 `image_cb_red` 订阅**同一个话题**、每帧各跑一遍 HSV（浪费，但改了会动时序）。
+* 距离度量 `sqrt((x_mid-320)**2 + (480-y_mid)**2)` 按 640×480 写死。
+* `grasp(self, y, x, layer)` 的形参顺序与实参顺序不一致（调用处传的是 `(x, y)`）——
+  保持原样，改了会改变机械臂落点。
+* `broccoli_found_count >= 10` / `water_found_count >= 30` 等稳定性阈值。
+
+### 5.1 改过的一处真 bug：水源与红块**共用计数器**
+
+原 `grasp.py` 里 `image_cb_red` 和 `image_cb` **共用** `self.water_found_count` /
+`self.found_water`。两个回调订阅同一个话题、每帧各跑一次，于是互相清零：
+
+```
+image_cb     （蓝）：中心稳定 -> water_found_count += 1
+image_cb_red （红）：没找到轮廓 -> water_found_count = 0     ← 把蓝攒的清了
+```
+
+**现象**：按 G 抓水源，只看到 `[WARN] finding water` 一直刷、机械臂不动 ——
+`found_water` 永远到不了 True。
+
+**实测（2026-10-14，板端探针）**：60 帧里蓝色轮廓 **0/60**（画面是灰地毯 + 一块
+白方块，S≈9），红色轮廓 59/60 但中心每帧跳几十像素（不稳定）→ 共享计数恒为 0。
+
+**处置**：红色用自己的 `red_found_count` / `found_red`，`grasp_cp` 里抓红块那条
+分支（`'6'` / `'12'`）等 `found_red`。
+
+> 注意：这次同时暴露了"**有红没蓝**时计数必为 0"。即使把蓝色水源放进视野，
+> 只要红分支还在清零，照样抓不到 —— 所以这是必修项，不是优化。
+
+### 5.2 水源认不出来时的排查顺序
+
+`grasp.py` 认水源靠的是**固定 HSV 区间**：`H[95,130] S[90,255] V[80,255]`。
+
+```sh
+# 板上量一量相机到底看到什么（只订阅，不改任何东西）
+run python3 /data/local/release/usr/share/semi_auto_match_24/test/probe_grasp_colors.py 60
+```
+
+它照抄 grasp.py 的两条流水线，打印：蓝/红各有几帧出轮廓、中心稳不稳、
+按现在的共享计数 vs 各用各的计数分别会不会 `found_water`，并把当前帧与两张掩膜
+落到 `/data/local/tmp/probe_*.png`。
+
+| 观察 | 结论 |
+|---|---|
+| 蓝轮廓 0/N，且全图 S 均值很低 | **画面里没有蓝色目标** —— 把水源放进相机视野（相机装在机械臂上，朝下看夹爪附近） |
+| 蓝轮廓有，但中心每帧跳 >4px | 目标在动 / 光斑不稳 —— 拿稳，或调阈值 |
+| 有蓝有轮廓但 S 明显 <90 | 目标不是饱和蓝（白 / 浅蓝 / 过曝）—— 换目标，或放宽 `LowerBlue` 的 S 下限 |
+
+### 5.3 抓取高度：一个高度给三种目标，并且能现场调
+
+**单位是毫米** —— `swiftpro` 的 `position.z` 直接拼成 Gcode `G0 X.. Y.. Z..`，
+`swiftpro_write_node.cpp` 的注释写明 `x,y,z(mm)`，Z=0 是机械臂底座平面。
+
+原 `grasp()` 是按**按键大小写**选高度，和抓什么东西无关：
+
+```python
+if layer in ['10', '11', '12']:   # 大写 G/T/E
+    z_up, z_down = 90, 30
+else:                             # 小写 g/t/e
+    z_up, z_down = 20, -55
+```
+
+**两支差了 85mm** —— 这才是"三个目标高度看着不一样"的真正原因。
+
+板端日志实测（`swiftpro_write_node` 每次都会 `ROS_INFO` 打 Gcode，
+所以实际发出去的 Z 是确定的，不用猜）：
+
+| 你按的键 | 走的支 | 实际发的 Gcode | 结果 |
+|---|---|---|---|
+| 小写 `g` / `t`（水源、蔬菜） | `else` | `Z20` → `Z-55` | 太低，机械臂顶到自己 |
+| 大写 `E`（红色方块） | `if` | `Z90` → `Z30` | 太高，吸盘够不到 |
+
+**现在统一成一套，大小写只决定发哪条指令、不影响高度**：
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| `z_up` | 20 | 悬停高度 |
+| `z_down` | **-45** | 原小写分支是 -55，实测太深，抬高 1cm |
+
+**现场调（不用重新编译）**：
+
+```sh
+# 板上直接改，然后重启 grasp（或重跑菜单第 11 项）
+vi /data/local/release/usr/share/semi_auto_match_24/config/grasp_heights.yaml
+#   顶到自己/压住物体 -> z_down 调大；吸盘够不到 -> z_down 调小
+```
+
+单跑时也能临时覆盖：`run rosrun semi_auto_match_24 grasp.py _z_down:=-40`。
+节点启动时会打印实际用的高度（`抓取高度(mm): z_up=.. z_down=..`），
+抓取时还会打一条 `抓取目标=... layer=... -> z_up=.. z_down=..`，便于核对。
+
+> **怎么自查实际发了什么 Z**：`swiftpro_write_node` 把每条 Gcode 都打进
+> `<log>/<run>/swiftpro_write_node-9-stdout.log`，直接
+> `grep -o 'G0 X.*Z[-0-9.]*'` 就能看到真实轨迹 —— 比看机械臂动作可靠得多。
+
+### 5.4 "够不到"的位姿：机械臂不动，但泵照开、臂照抬
+
+**症状**：抓某个目标时机械臂**不动**，却看到吸泵先开、然后直接抬到高位；
+`swiftpro_rviz_node` 刷 `[ERROR] Inverse kinematic is wrong`。
+
+**这不是两个问题，是同一个**：标定把像素映射成机械臂坐标，但机械臂
+**够不到所有位置**。够不到时固件不接受那个位姿（机械臂原地不动），
+而 `grasp()` 后面照样 `pub2.publish(1)` 开泵、照样抬到 `(230, 0, 160)` ——
+现场看起来就是"没抓就跑了"。
+
+那句 `Inverse kinematic is wrong` 来自 `swiftpro_rviz_node`，
+**那个节点只把位姿画到 rviz、不参与实际运动**：
+
+```cpp
+if ( swiftpro_ik(position, angle) )   // 算不出来就只报一句
+    all_joints_state(angle);
+else
+    ROS_ERROR("Inverse kinematic is wrong");
+```
+
+所以它是**同一个数学结论的旁证**，不是原因 —— 但它恰好是最早能看到的那条线索。
+
+**可达区域（实测，640×480，标定用板上 thefile.txt，z=20 与 -45 都要可达）**：
+
+```
+行   0 ~ 110   整行都够不到        pos.x > ~370mm，超出臂展
+行 112 ~ 300   只有中间一条横带可达，越往下越宽
+行 320 ~ 400   整行都可达   ← 物体放这里最稳
+行 410 ~ 480   底部中央出现缺口    列约 280~440，离底座太近折不过来
+```
+
+```sh
+# 打印这张图
+python3 test/reachable_area.py
+# 板上跑：抓一帧相机，把可达区叠成绿/红存 PNG
+run python3 /data/local/release/usr/share/semi_auto_match_24/test/reachable_area.py --overlay
+```
+
+**现在的行为**：`grasp()` 在发位姿前先判可达（`nodes/arm_ik.py`，
+数学照抄 `swiftpro_rviz_node.cpp` 的 `swiftpro_ik()`）；够不到就
+**直接放弃本次抓取（不吸、不抬）** 并打一条说清该往哪挪的 ERROR。
+
+> 数学放在 `nodes/arm_ik.py` 一份，`grasp.py` 与 `test/reachable_area.py` 共用 ——
+> 两处各写一份的话，判据会漂移，那就比不判还糟。
+
+### 5.5 红色方块检不到：HSV 的红色是**两端**的
+
+**症状**：物块明明在可达区（`reachable_area.py --overlay` 里是绿的），就是抓不到；
+抓水源/蔬菜却正常。
+
+**根因**：红色在 OpenCV 色环上是**两端** —— H≈0 **和** H≈179。
+原程序写的是：
+
+```python
+LowerRed = np.array([146, 80, 46])     # 只覆盖**高端**
+UpperRed = np.array([180, 255, 255])
+```
+
+而板上这块方块实测 **H≈0~5**（直方图峰值在 H=1~3）。**一个像素都匹配不到**，
+于是检测器只能去锁画面里的噪声，算出来的抓取坐标全是垃圾。
+
+**还有第二个坑**（在真实帧上跑完整流水线才暴露）：
+
+| 方案 | 结果 |
+|---|---|
+| 原样 `H[146,180]` + H 通道阈值 20 | 无轮廓 |
+| 只把区间改成 `H[0,15]`，阈值仍是 20 | inRange 命中 **19238** 像素，**仍然无轮廓** |
+| `H[0,15]` + 阈值降到 1 | 轮廓 22 个，最大面积 13788，中心 (328, 299) |
+| **`H[0,15]` + 直接对掩膜二值化** | **轮廓 1 个**，面积 14998，中心 (329, 297) ← 采用 |
+| `H[0,15] ∪ [160,180]` | 最大轮廓包围盒横跨半个画面 ← **把左侧鞋子/杂物也当成红色** |
+
+原因：红色分支那步 `cv2.threshold(blurred, 20, ...)` 是对**取出来的 H 通道**取阈值，
+`H≈0~5` 会被 20 直接抹平 —— 区间改对了也没用。改成直接对掩膜二值化，
+顺带避开"对环绕的 H 做 blur"在红端产生的伪影。
+
+**处置**：区间改成 `H[0, 15]`（**不要**把 `[160,180]` 并进来），
+阈值走掩膜；两个区间可由 `config/grasp_colors.yaml` 覆盖。
+改完中心落在 (329, 297) → 机械臂 (186.2, 21.2)、半径 187 → **可达**。
+
+> 换方块颜色/材质后重新量：`test/probe_grasp_colors.py` 会打印高饱和像素的
+> 色相直方图；`H` 落在哪就照那个改 `grasp_colors.yaml`。
+
+唯一一处**必须改**的默认值：手眼标定文件的查找顺序。原程序写死 `$HOME/thefile.txt`，
+而本板 `HOME=/`，实测标定文件在 `/data/local/release/usr/thefile.txt`。
+现在按 `~calib_file` > `$SEMI_AUTO_MATCH_CALIB` > `$HOME/thefile.txt` >
+`/data/local/release/usr/thefile.txt` 找第一个存在的，并把选中的路径打进日志
+（标定文件选错不会报错，只会让机械臂抓偏）。
+
+---
+
+## 6. 编译
+
+```bash
+# 推荐：增量编译（SDK 只解一次，改几个文件重编几十秒）
+wsl -d Ubuntu-22.04 -u root -- bash spark-cross/board/build_persist.sh
+
+# 或者用原始入口（每次全新临时目录，解 SDK 约 8 分钟）
+cd ~/spark/spark-cross && sudo ./demo.sh 2>&1 | tee /tmp/build.log
+```
+
+产物落点：
+
+```
+install/usr/lib/semi_auto_match_24/{detect_rknn.py,grasp.py,teleop.py,rknn_yolo.py,roi_map.py}
+install/usr/share/semi_auto_match_24/{launch,config/yolo,rviz,docs,python/rknn,msg,package.xml}
+install/usr/lib/python3.12/site-packages/semi_auto_match_24/msg/   # LocationCentre
+install/usr/include/semi_auto_match_24/LocationCentre.h
+```
+
+**注意 `install/` 是累积的**：判断"这次到底编出来没有"要看构建日志的 Summary，
+不是看目录里有没有东西。
+
+> 已知的构建脆弱点（与本次改动无关）：`build.sh` 用 `--parallel-packages` 并行跑
+> 各包的 `make DESTDIR=... install`，而每个包都会往 `$DESTDIR/usr/` 写同一批
+> catkin setup 文件（`setup.bash` / `env.sh` / `_setup_util.py` …）。并发时会撞出
+> `file INSTALL cannot set modification time ...: No such file or directory`，
+> 表现为某个包 Failed、其余全部 Abandoned。**重跑一次即可**（本次就复现过一次）。
+
+---
+
+## 7. 自测
+
+### 7.1 契约回归（任何机器，纯标准库）
+
+```bash
+python3 spark_noetic/src/3rd_app/semi_auto_match_24/test/test_rknn_yolo_postprocess.py
+```
+
+钉住本赛项最容易静默出错的两条契约：**西兰花对外 id 必须是 56**
+（YOLOv5 给的是 50）、**ROI 坐标换算必须与原 `detect.py` 一致**
+（x 逐像素一致、y 默认差 1.6 px、显式 `[160,158.4]` 时也一致）。
+
+### 7.2 解码回归（需要 numpy + cv2 → 板上跑）
+
+同一个脚本的第二层，覆盖 YOLOv5 解码 vs `rknn_model_zoo` 参考实现逐框一致、
+NMS 真在抑制重叠框、letterbox 正反闭环、标签文件三种写法、缺 anchors 时明确报错。
+
+```sh
+# 板上
+run python3 test/test_rknn_yolo_postprocess.py
+```
+
+> 开发机上跑不了这一层：SDK 的 target sysroot 里只有 **aarch64** 的 cv2
+> （x86_64 的宿主 python 加载不了），而且 **numpy 根本不在 SDK 里**
+> —— 它是板端运行时依赖。脚本会自动 `[SKIP]` 第二层并以 0 退出。
+
+### 7.3 launch 静态引用检查（任何机器）
+
+```bash
+python3 spark_noetic/src/3rd_app/semi_auto_match_24/test/check_launch_refs.py
+```
+
+查 `$(arg)` 有没有出处、`$(find PKG)` / `<node pkg=...>` 指向的包在不在
+（工作区 ∪ SDK 预装），以及有没有引用到 **skiplist 里的包** ——
+`cannot launch node of type` 就是这么来的，交叉编译阶段完全看不出来。
+（`roslaunch --nodes` 在本机跑不了：SDK 里缺 `defusedxml`。）
+
+---
+
+## 8. 部署到板子
+
+一条命令（三处落点一起推、板端先备份、装一键菜单、逐文件 md5 校验）：
+
+```bash
+printf '123456\n' > /tmp/.board_pass && chmod 600 /tmp/.board_pass   # 只需一次
+bash spark-cross/board/deploy_semi_auto_match.sh
+```
+
+回滚：`cd /data/local/release && tar xzf /data/local/tmp/backup-semi_auto_match_24-<时间戳>.tgz`
+
+要点：
+
+* **三处落点缺一不可**：`usr/lib/<pkg>`（节点与被 import 的模块）、
+  `usr/share/<pkg>`（launch/config/python/rknn/package.xml）、
+  `usr/lib/python3.12/site-packages/<pkg>`（消息包）。少一处就是
+  `ModuleNotFoundError` 或 `cannot launch node of type`，而编译期完全看不出来。
+* 一键菜单 `/data/local/release/onekey.sh` 是**两个赛项共用**的共享文件，
+  部署脚本会覆盖它（先按时间戳备份），菜单里第 11 项就是本赛项。
+* 本包依赖 `spark_carry_object` 的消息（`grasp.py` 的机械臂指令），板端已装；
+  若某块板只有 prebuilt 的 `swiftpro`，代码会自动退回它，不用改。
+* 模型与运行时是厂商件，随镜像部署：
+  `/data/local/release/rknn-demo/{model/yolov5s-640-640.rknn,lib/librknnrt.so}`。
+  路径不对时节点会 `logfatal` 并退出（不会静默发空消息）。
+* 手眼标定文件在 `/data/local/release/usr/thefile.txt`（板端 `HOME=/`，
+  原程序那句 `$HOME/thefile.txt` 落不到这儿，见 §5）。
+* 板端启动一律走 `run` 包装（裸 `python3` 缺 `libpython3.12.so`）：
+
+  ```sh
+  run roslaunch semi_auto_match_24 semi_auto.launch
+  ```
+
+* 板端 `/tmp` 是**只读**的：任何带 heredoc / `sed -i` 的脚本都要先
+  `export TMPDIR=/data/local/tmp`，否则报
+  `can't create temporary file /tmp/…: Read-only file system`。
+
+---
+
+## 9. 板端验证
+
+### 9.1 已做（2026-10-14，板 192.168.100.118）
+
+部署：`bash spark-cross/board/deploy_semi_auto_match.sh`（三处落点一起推，
+30 个文件逐个 `md5sum -c` 通过；一键菜单一并更新并备份）。
+
+| 验的东西 | 结果 |
+|---|---|
+| 交叉编译 | `build_persist.sh` 全绿，43/43 包成功 |
+| 包能不能被找到 | `run rospack find semi_auto_match_24` → `/data/local/release/usr/share/semi_auto_match_24` |
+| 消息能不能 import | `import semi_auto_match_24.msg` → `LocationCentre` OK |
+| launch 能不能解析 | `roslaunch --nodes semi_auto.launch` → 12 个节点全部解析（含 realsense / swiftpro / rviz / ydlidar） |
+| 模型 ↔ 运行时 | `api=1.5.0 / driver=0.9.5 / head=v5 / nc=80` —— 同代，能加载 |
+| NPU 真推理 | 640×640 输入：**NPU 17–19 ms + 后处理 0.9 ms ≈ 19–21 ms/帧** |
+| 检测节点真起来 | `rosnode list` → `/detect_rknn`；发布 `/location [semi_auto_match_24/LocationCentre]` + `/debug_image [sensor_msgs/Image]`；订阅 remap 到 `/camera/color/image_rect_color` |
+| 节点启动日志 | `roi=(160,160,320,320) roi_offset=(160.0,160.0)`、`类别 id 已按映射表换算（80 类）` |
+| 契约回归（两层） | 板上 `ALL PASS` —— 含开发机上跑不了解码层 |
+| 依赖 | 板上 `numpy 1.26.4 / cv2 4.11.0 / rospy / cv_bridge / rospkg` 齐 |
+| 手眼标定文件 | `/data/local/release/usr/thefile.txt` 在（`HOME=/`，原程序那句 `$HOME/thefile.txt` 找不到东西） |
+| **rviz 真的画出来了** | 截屏取证：`Global Status: Ok` / `Fixed Frame: OK`，机器人模型（带贴图）居中、TF 轴、Grid 都在；Camera 面板出实时彩色图；起 `detect_rknn` 后 Detect 面板出检测图，`/debug_image` **29.9 Hz** |
+
+### 9.1.1 板上怎么"眼见为实"（不需要人看 VNC）
+
+板子上没有 `xwd` / `import` / `ffmpeg`，但 **libX11 在**（rviz 自己就靠它），
+所以直接 ctypes 走 X11 协议抓屏即可（只用 numpy + cv2）：
+
+```python
+x11 = ctypes.CDLL("/data/local/release/lib/libX11.so.6")
+dpy = x11.XOpenDisplay(b":0")
+img = x11.XGetImage(dpy, root, 0, 0, w, h, AllPlanes, ZPixmap)   # XImage 结构体照抄 Xlib.h
+```
+
+拿回来 base64 落本地 PNG，就能直接看。**前提是 X 得先起来**，而这有个坑：
+
+> 板子根文件系统是**只读**的，`/tmp` 也在上面。Xvfb 要在 `/tmp` 建锁文件，
+> 所以**直接起会报** `Fatal server error: Could not create lock file in /tmp/.tX0-lock`
+> 然后客户端连不上（rviz 报 `qt.qpa.xcb: could not connect to display :0`）。
+> 一键菜单的 `check_mount()` 干的就是这件事，自己写脚本时**必须先照抄**：
+>
+> ```sh
+> mount -o remount,rw /
+> mount -t tmpfs tmpfs /tmp          # 根目录 remount rw 之后通常就不需要这步了
+> rm -f /tmp/.tX*-lock; rm -rf /tmp/.X*-unix    # 清上次异常退出的残留
+> ```
+>
+> 少了这步的现象是"Xvfb 进程在、socket 没有、所有客户端连不上"，很容易误判成 rviz 的问题。
+
+> 探测过程只起了「检测节点」这一条链，**没有启动底盘与机械臂**，按 PID 清理干净。
+
+### 9.2 还没做（要上场地，且会动物理设备）
+
+1. 走一键菜单第 11 项跑完整 `semi_auto.launch`（会启动底盘驱动与机械臂；
+   `grasp.py` 初始化时会发一次机械臂复位指令）。
+2. 相机出图后看 `rostopic hz /debug_image` 的**端到端**帧率（上面的 19 ms 是
+   纯推理+后处理，不含取流与解码）。
+3. 拿实物确认 `/location` 发的是 `obj_id=56`（西兰花）而不是 50。
+4. 把西兰花放在画面已知位置，比对 `/location` 的 `loc_centre_x/y` 与实际像素，
+   定 `roi_offset` 用默认 `[160,160]` 还是复现原版的 `[160,158.4]`。
+5. 另开终端 `run rosrun semi_auto_match_24 teleop.py` 逐键验证抓取/放下/复位。
+6. `~show_debug:=true` 下确认 `cv2.imshow` 能不能出画面（出不来就用
+   `/debug_image` + rviz 的 Detect 面板）。
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\share\semi_auto_match_24\python\rknn\api.py ===
+
+"""``librknnrt.so`` 的 ctypes 绑定 —— rknn-toolkit-lite2 推理子集的兼容层。
+
+为什么需要
+----------
+本板是 OpenHarmony（musl / OHOS ABI）：PyPI 上的 ``rknn-toolkit-lite2`` 只有
+manylinux(glibc) 轮子，pip 一个标签都不认，装不上；厂商只提供了 C 运行时
+``librknnrt.so``。C ABI 是稳定的，用 ctypes 直接绑即可 —— 不需要编译器、
+不需要 glibc，这是 musl 板上唯一可行的路径。
+
+暴露两个门面
+------------
+* :class:`RKNNLite` —— 对齐官方 ``rknn-toolkit-lite2`` 的 ``RKNNLite`` 接口
+* :class:`RKNN`     —— 对齐 ``rknn_model_zoo`` 里 ``rknn.api.RKNN`` 的写法
+
+分层约定
+--------
+本层只做「模型文件 → float32 输出数组」的搬运，**不含任何后处理假设**：
+不猜 sigmoid、不猜 YOLO head 布局、不做解码。那些是调用方的职责
+（``nodes/rknn_yolo.py``）—— 在这一层猜错会静默给出错误的框。
+
+结构体字段顺序照抄 ``rknn_api.h``（v1.5/1.6 ABI）；与板上 ``librknnrt.so``
+用真实推理验证过，不要"整理"字段顺序或省略字段（对齐坑见
+``references/ctypes-api.md``）。
+"""
+
+import ctypes
+import os
+import warnings
+
+import numpy as np
+
+__all__ = [
+    "RKNNLite",
+    "RKNN",
+    "TensorInfo",
+    "DEFAULT_LIB",
+    "NPU_CORE_AUTO",
+    "NPU_CORE_0",
+    "NPU_CORE_1",
+    "NPU_CORE_2",
+    "NPU_CORE_0_1",
+    "NPU_CORE_0_1_2",
+    "NPU_CORE_ALL",
+]
+
+# --------------------------------------------------------------------- 常量 ----
+
+RKNN_MAX_DIMS = 16
+RKNN_MAX_NAME_LEN = 256
+
+# rknn_query_cmd
+RKNN_QUERY_IN_OUT_NUM = 0
+RKNN_QUERY_INPUT_ATTR = 1
+RKNN_QUERY_OUTPUT_ATTR = 2
+RKNN_QUERY_SDK_VERSION = 5
+
+# rknn_tensor_type
+RKNN_TENSOR_FLOAT32 = 0
+RKNN_TENSOR_FLOAT16 = 1
+RKNN_TENSOR_INT8 = 2
+RKNN_TENSOR_UINT8 = 3
+RKNN_TENSOR_INT16 = 4
+RKNN_TENSOR_UINT16 = 5
+RKNN_TENSOR_INT32 = 6
+RKNN_TENSOR_UINT32 = 7
+RKNN_TENSOR_INT64 = 8
+RKNN_TENSOR_BOOL = 9
+RKNN_TENSOR_INT4 = 10
+
+# rknn_tensor_format
+RKNN_TENSOR_NCHW = 0
+RKNN_TENSOR_NHWC = 1
+
+# rknn_core_mask —— RK3588 有三个 NPU 核。不给 mask 时运行时只用 core0，
+# 这就是"Core1/Core2 占用率恒为 0"的原因（见 references/performance.md）。
+NPU_CORE_AUTO = 0
+NPU_CORE_0 = 1
+NPU_CORE_1 = 2
+NPU_CORE_2 = 4
+NPU_CORE_0_1 = 3
+NPU_CORE_0_1_2 = 7
+NPU_CORE_ALL = 0xFFFF
+
+# rknn_api.h 里的错误码
+RKNN_ERR_NAMES = {
+    0: "RKNN_SUCC",
+    -1: "RKNN_ERR_FAIL",
+    -2: "RKNN_ERR_TIMEOUT",
+    -3: "RKNN_ERR_DEVICE_UNAVAILABLE",
+    -4: "RKNN_ERR_MALLOC_FAIL",
+    -5: "RKNN_ERR_PARAM_INVALID",
+    -6: "RKNN_ERR_MODEL_INVALID",
+    -7: "RKNN_ERR_CTX_INVALID",
+    -8: "RKNN_ERR_INPUT_INVALID",
+    -9: "RKNN_ERR_OUTPUT_INVALID",
+    -10: "RKNN_ERR_DEVICE_UNMATCH",
+    -11: "RKNN_ERR_INCOMPATILE_PRE_COMPILE_MODEL",
+    -12: "RKNN_ERR_INCOMPATILE_OPTIMIZATION_LEVEL_VERSION",
+    -13: "RKNN_ERR_TARGET_PLATFORM_UNMATCH",
+}
+
+# 与本板（KaiHong RK3588 / OpenHarmony）厂商运行时一致的默认路径。
+DEFAULT_LIB = "/data/local/release/rknn-demo/lib/librknnrt.so"
+
+_DATA_TYPE_TO_TENSOR = {
+    "float32": RKNN_TENSOR_FLOAT32,
+    "float16": RKNN_TENSOR_FLOAT16,
+    "int8": RKNN_TENSOR_INT8,
+    "uint8": RKNN_TENSOR_UINT8,
+    "int16": RKNN_TENSOR_INT16,
+    "uint16": RKNN_TENSOR_UINT16,
+    "int32": RKNN_TENSOR_INT32,
+    "uint32": RKNN_TENSOR_UINT32,
+    "int64": RKNN_TENSOR_INT64,
+    "bool": RKNN_TENSOR_BOOL,
+}
+
+_NUMPY_TO_DATA_TYPE = {
+    "uint8": "uint8",
+    "int8": "int8",
+    "float32": "float32",
+    "float16": "float16",
+    "int16": "int16",
+    "uint16": "uint16",
+    "int32": "int32",
+    "uint32": "uint32",
+    "int64": "int64",
+}
+
+_DATA_FORMAT_TO_TENSOR = {"nchw": RKNN_TENSOR_NCHW, "nhwc": RKNN_TENSOR_NHWC}
+
+
+def error_name(ret):
+    """把 rknn 返回码翻成人能读的名字（未收录的返回码原样回显）。"""
+    return RKNN_ERR_NAMES.get(ret, "RKNN_ERR_UNKNOWN(%d)" % ret)
+
+
+# ------------------------------------------------------------- C 结构体镜像 ----
+
+
+class RknnTensorAttr(ctypes.Structure):
+    _fields_ = [
+        ("index", ctypes.c_uint32),
+        ("n_dims", ctypes.c_uint32),
+        ("dims", ctypes.c_uint32 * RKNN_MAX_DIMS),
+        ("name", ctypes.c_char * RKNN_MAX_NAME_LEN),
+        ("n_elems", ctypes.c_uint32),
+        ("size", ctypes.c_uint32),
+        ("fmt", ctypes.c_int),
+        ("type", ctypes.c_int),
+        ("qnt_type", ctypes.c_int),
+        ("fl", ctypes.c_int8),
+        ("zp", ctypes.c_int32),
+        ("scale", ctypes.c_float),
+        ("w_stride", ctypes.c_uint32),
+        ("size_with_stride", ctypes.c_uint32),
+        ("pass_through", ctypes.c_uint8),
+        ("h_stride", ctypes.c_uint32),
+    ]
+
+
+class RknnInput(ctypes.Structure):
+    _fields_ = [
+        ("index", ctypes.c_uint32),
+        ("buf", ctypes.c_void_p),
+        ("size", ctypes.c_uint32),
+        ("pass_through", ctypes.c_uint8),
+        ("type", ctypes.c_int),
+        ("fmt", ctypes.c_int),
+    ]
+
+
+class RknnOutput(ctypes.Structure):
+    _fields_ = [
+        ("want_float", ctypes.c_uint8),
+        ("is_prealloc", ctypes.c_uint8),
+        ("index", ctypes.c_uint32),
+        ("buf", ctypes.c_void_p),
+        ("size", ctypes.c_uint32),
+    ]
+
+
+class RknnInputOutputNum(ctypes.Structure):
+    _fields_ = [("n_input", ctypes.c_uint32), ("n_output", ctypes.c_uint32)]
+
+
+class RknnSdkVersion(ctypes.Structure):
+    _fields_ = [
+        ("api_version", ctypes.c_char * 256),
+        ("drv_version", ctypes.c_char * 256),
+    ]
+
+
+class TensorInfo(object):
+    """rknn_query 回来的张量描述，只留调用方用得上的字段。"""
+
+    __slots__ = ("index", "name", "shape", "fmt", "type", "n_elems", "size", "zp", "scale")
+
+    def __init__(self, attr):
+        self.index = int(attr.index)
+        self.name = attr.name.decode("utf-8", "replace")
+        self.shape = [int(attr.dims[d]) for d in range(attr.n_dims)]
+        self.fmt = int(attr.fmt)
+        self.type = int(attr.type)
+        self.n_elems = int(attr.n_elems)
+        self.size = int(attr.size)
+        self.zp = int(attr.zp)
+        self.scale = float(attr.scale)
+
+    @property
+    def is_nhwc(self):
+        return self.fmt == RKNN_TENSOR_NHWC
+
+    def __repr__(self):
+        return "TensorInfo(index=%d, name=%r, shape=%s, fmt=%d, type=%d)" % (
+            self.index, self.name, self.shape, self.fmt, self.type,
+        )
+
+
+# ----------------------------------------------------------------- 动态库加载 ----
+
+_lib_cache = {}
+
+
+def _preload_cxx_runtime(lib_path):
+    """先 dlopen ``libc++_shared.so`` 再 dlopen ``librknnrt.so``。
+
+    ``librknnrt.so`` 依赖 ``libc++_shared.so``，而 OpenHarmony release 里
+    没有把它装到系统库路径；板上没有 ``ldd``，与其猜依赖不如把厂商放在
+    运行时旁边的那个副本直接预加载（RTLD_GLOBAL 让后续 dlopen 能解析到）。
+    """
+    candidates = []
+    env = os.environ.get("RKNN_CXX_LIB")
+    if env:
+        candidates.append(env)
+    lib_dir = os.path.dirname(os.path.abspath(lib_path))
+    candidates.append(os.path.join(lib_dir, "libc++_shared.so"))
+    candidates.append("/data/local/release/rknn-demo/lib/libc++_shared.so")
+    candidates.append("/usr/lib/libc++_shared.so")
+    for path in candidates:
+        if path and os.path.exists(path):
+            try:
+                ctypes.CDLL(path, mode=ctypes.RTLD_GLOBAL)
+            except OSError:
+                # 已经加载过、或与本次运行时不同代：交给下一步 dlopen 报错，
+                # 不要在这里吞掉真正的原因。
+                continue
+            return path
+    return None
+
+
+def _load_library(lib_path):
+    """按路径缓存地 dlopen librknnrt.so 并声明函数签名。"""
+    if lib_path in _lib_cache:
+        return _lib_cache[lib_path]
+
+    if not os.path.exists(lib_path):
+        raise OSError(
+            "找不到 RKNN 运行时 %r；用 lib_path= 或环境变量 RKNN_RT_LIB 指定 "
+            "librknnrt.so 的位置" % lib_path
+        )
+
+    _preload_cxx_runtime(lib_path)
+    try:
+        lib = ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+    except OSError as exc:
+        raise OSError(
+            "dlopen(%s) 失败: %s —— 通常是缺 libc++_shared.so（设 RKNN_CXX_LIB 指向它）"
+            % (lib_path, exc)
+        )
+
+    # argtypes 必须显式声明：rknn_context 是 uint64，靠默认的 int 会被截断。
+    lib.rknn_init.argtypes = [
+        ctypes.POINTER(ctypes.c_uint64), ctypes.c_void_p,
+        ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
+    ]
+    lib.rknn_init.restype = ctypes.c_int
+    lib.rknn_query.argtypes = [ctypes.c_uint64, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+    lib.rknn_query.restype = ctypes.c_int
+    lib.rknn_inputs_set.argtypes = [ctypes.c_uint64, ctypes.c_uint32, ctypes.POINTER(RknnInput)]
+    lib.rknn_inputs_set.restype = ctypes.c_int
+    lib.rknn_run.argtypes = [ctypes.c_uint64, ctypes.c_void_p]
+    lib.rknn_run.restype = ctypes.c_int
+    lib.rknn_outputs_get.argtypes = [
+        ctypes.c_uint64, ctypes.c_uint32, ctypes.POINTER(RknnOutput), ctypes.c_void_p,
+    ]
+    lib.rknn_outputs_get.restype = ctypes.c_int
+    lib.rknn_outputs_release.argtypes = [
+        ctypes.c_uint64, ctypes.c_uint32, ctypes.POINTER(RknnOutput),
+    ]
+    lib.rknn_outputs_release.restype = ctypes.c_int
+    lib.rknn_destroy.argtypes = [ctypes.c_uint64]
+    lib.rknn_destroy.restype = ctypes.c_int
+
+    # 1.4 之前的运行时没有 set_core_mask；有则声明，没有就跳过。
+    if hasattr(lib, "rknn_set_core_mask"):
+        lib.rknn_set_core_mask.argtypes = [ctypes.c_uint64, ctypes.c_int]
+        lib.rknn_set_core_mask.restype = ctypes.c_int
+
+    _lib_cache[lib_path] = lib
+    return lib
+
+
+# ------------------------------------------------------------------- 运行时 ----
+
+_CORE_MASK_NAMES = {
+    NPU_CORE_AUTO: "auto",
+    NPU_CORE_0: "0",
+    NPU_CORE_1: "1",
+    NPU_CORE_2: "2",
+    NPU_CORE_0_1: "0_1",
+    NPU_CORE_0_1_2: "0_1_2",
+    NPU_CORE_ALL: "all",
+}
+
+
+def core_mask_from_string(value):
+    """把 ``"0_1_2"`` / ``"0,1,2"`` / int 统一成 rknn_core_mask 位掩码。
+
+    ROS 参数只能是字符串或整数，这里同时容忍 ``"NPU_CORE_0_1_2"`` 这种
+    从官方示例里抄来的写法。
+    """
+    if isinstance(value, int):
+        return value
+    text = str(value).strip().upper()
+    if text.startswith("NPU_CORE_"):
+        text = text[len("NPU_CORE_"):]
+    text = text.replace(",", "_").replace("|", "_").replace("+", "_")
+    if text in ("AUTO", ""):
+        return NPU_CORE_AUTO
+    if text == "ALL":
+        return NPU_CORE_ALL
+    mask = 0
+    for part in text.split("_"):
+        if part == "":
+            continue
+        if part not in ("0", "1", "2"):
+            raise ValueError(
+                "无法识别的 core_mask %r；可用: auto / 0 / 1 / 2 / 0_1 / 0_1_2 / all" % value
+            )
+        mask |= {0: NPU_CORE_0, 1: NPU_CORE_1, 2: NPU_CORE_2}[int(part)]
+    return mask
+
+
+class _Runtime(object):
+    """两个门面共用的引擎：模型 → float32 输出。"""
+
+    def __init__(self, lib_path=None, verbose=False):
+        self.verbose = verbose
+        self.lib_path = lib_path or os.environ.get("RKNN_RT_LIB") or DEFAULT_LIB
+        self._lib = _load_library(self.lib_path)
+        self._ctx = None
+        self._model_path = None
+        self.n_input = 0
+        self.n_output = 0
+        self.input_attrs = []
+        self.output_attrs = []
+        self.sdk_version = None
+        self.driver_version = None
+        self.core_mask = NPU_CORE_AUTO
+
+    # -- 生命周期 ------------------------------------------------------
+    def load_rknn(self, path, file_size=0):
+        if not os.path.exists(path):
+            raise FileNotFoundError("模型文件不存在: %s" % path)
+        self._model_path = path
+        return 0
+
+    def init_runtime(self, target=None, device_id=None, perf_debug=False,
+                     eval_mem=False, async_mode=False, core_mask=NPU_CORE_AUTO,
+                     **kwargs):
+        if self._model_path is None:
+            raise RuntimeError("必须先 load_rknn(path) 再 init_runtime()")
+        # target/device_id/async_mode 在单板本地推理里没有对应参数：留着是为了
+        # 让从官方示例抄来的调用不用改。
+        if async_mode:
+            warnings.warn("本兼容层不支持 async_mode，按同步推理执行")
+        del target, device_id, perf_debug, eval_mem, kwargs
+
+        ctx = ctypes.c_uint64(0)
+        # size=0 表示 model 传的是"模型文件路径"，不是内存里的模型数据。
+        ret = self._lib.rknn_init(
+            ctypes.byref(ctx), ctypes.c_char_p(self._model_path.encode()), 0, 0, None
+        )
+        if ret != 0:
+            raise RuntimeError(
+                "rknn_init(%s) 失败: %s —— 最常见的原因是模型与运行时不同代"
+                % (self._model_path, error_name(ret))
+            )
+        self._ctx = ctx
+
+        ver = RknnSdkVersion()
+        if self._lib.rknn_query(ctx, RKNN_QUERY_SDK_VERSION,
+                                ctypes.byref(ver), ctypes.sizeof(ver)) == 0:
+            self.sdk_version = ver.api_version.decode("utf-8", "replace")
+            self.driver_version = ver.drv_version.decode("utf-8", "replace")
+
+        self.core_mask = core_mask_from_string(core_mask)
+        if self.core_mask != NPU_CORE_AUTO:
+            if not hasattr(self._lib, "rknn_set_core_mask"):
+                warnings.warn("当前 librknnrt.so 没有 rknn_set_core_mask，core_mask 被忽略")
+            else:
+                ret = self._lib.rknn_set_core_mask(self._ctx, self.core_mask)
+                if ret != 0:
+                    warnings.warn("rknn_set_core_mask(%d) 失败: %s"
+                                  % (self.core_mask, error_name(ret)))
+
+        io_num = RknnInputOutputNum()
+        ret = self._lib.rknn_query(ctx, RKNN_QUERY_IN_OUT_NUM,
+                                   ctypes.byref(io_num), ctypes.sizeof(io_num))
+        if ret != 0:
+            raise RuntimeError("rknn_query(IN_OUT_NUM) 失败: %s" % error_name(ret))
+        self.n_input, self.n_output = int(io_num.n_input), int(io_num.n_output)
+
+        self.input_attrs = self._query_attrs(RKNN_QUERY_INPUT_ATTR, self.n_input)
+        self.output_attrs = self._query_attrs(RKNN_QUERY_OUTPUT_ATTR, self.n_output)
+
+        if self.verbose:
+            print("rknn: api %s / driver %s / core_mask %s"
+                  % (self.sdk_version, self.driver_version,
+                     _CORE_MASK_NAMES.get(self.core_mask, self.core_mask)))
+            for info in self.input_attrs:
+                print("  in  %s" % info)
+            for info in self.output_attrs:
+                print("  out %s" % info)
+        return 0
+
+    def _query_attrs(self, cmd, count):
+        attrs = []
+        for i in range(count):
+            attr = RknnTensorAttr()
+            attr.index = i
+            ret = self._lib.rknn_query(self._ctx, cmd, ctypes.byref(attr), ctypes.sizeof(attr))
+            if ret != 0:
+                raise RuntimeError("rknn_query(%d) 失败: %s" % (cmd, error_name(ret)))
+            attrs.append(TensorInfo(attr))
+        return attrs
+
+    # -- 推理 ----------------------------------------------------------
+    def inference(self, inputs, data_type=None, data_format="nhwc", inputs_pass_through=None):
+        if self._ctx is None:
+            raise RuntimeError("必须先 init_runtime()")
+        if not isinstance(inputs, (list, tuple)):
+            inputs = [inputs]
+        if len(inputs) != max(self.n_input, 1):
+            raise ValueError("模型需要 %d 个输入，收到 %d 个" % (self.n_input, len(inputs)))
+        if data_format not in _DATA_FORMAT_TO_TENSOR:
+            raise ValueError("data_format 只支持 nchw / nhwc，收到 %r" % (data_format,))
+        fmt = _DATA_FORMAT_TO_TENSOR[data_format]
+
+        if inputs_pass_through is None:
+            pass_through = [0] * len(inputs)
+        elif isinstance(inputs_pass_through, (list, tuple)):
+            pass_through = [int(v) for v in inputs_pass_through]
+        else:
+            pass_through = [int(inputs_pass_through)] * len(inputs)
+
+        rknn_inputs = (RknnInput * len(inputs))()
+        # 这些数组必须活到 rknn_inputs_set 返回为止，否则 buf 指向已释放内存。
+        held = []
+        for i, arr in enumerate(inputs):
+            buf = np.ascontiguousarray(arr)
+            held.append(buf)
+            if data_type is None:
+                dtype_name = _NUMPY_TO_DATA_TYPE.get(buf.dtype.name)
+                if dtype_name is None:
+                    raise ValueError("不支持的输入 dtype %r；请显式给 data_type=" % (buf.dtype,))
+            else:
+                dtype_name = str(data_type).lower()
+            if dtype_name not in _DATA_TYPE_TO_TENSOR:
+                raise ValueError("不支持的 data_type %r" % (data_type,))
+            rknn_inputs[i].index = i
+            rknn_inputs[i].buf = buf.ctypes.data_as(ctypes.c_void_p)
+            rknn_inputs[i].size = buf.nbytes
+            # pass_through=0：前处理（mean/std、rgb2bgr）交给驱动按模型元数据做。
+            rknn_inputs[i].pass_through = pass_through[i]
+            rknn_inputs[i].type = _DATA_TYPE_TO_TENSOR[dtype_name]
+            rknn_inputs[i].fmt = fmt
+
+        ret = self._lib.rknn_inputs_set(self._ctx, len(inputs), rknn_inputs)
+        if ret != 0:
+            raise RuntimeError("rknn_inputs_set 失败: %s" % error_name(ret))
+
+        ret = self._lib.rknn_run(self._ctx, None)
+        if ret != 0:
+            raise RuntimeError("rknn_run 失败: %s" % error_name(ret))
+
+        outputs = (RknnOutput * self.n_output)()
+        for i in range(self.n_output):
+            outputs[i].want_float = 1     # 驱动负责反量化成 float32
+            outputs[i].is_prealloc = 0    # 由驱动分配，用完必须 release
+            outputs[i].index = i
+
+        ret = self._lib.rknn_outputs_get(self._ctx, self.n_output, outputs, None)
+        if ret != 0:
+            raise RuntimeError("rknn_outputs_get 失败: %s" % error_name(ret))
+
+        result = []
+        try:
+            for i in range(self.n_output):
+                info = self.output_attrs[i]
+                if not outputs[i].buf:
+                    raise RuntimeError("输出 %d 的缓冲区为空" % i)
+                flat = np.ctypeslib.as_array(
+                    ctypes.cast(outputs[i].buf, ctypes.POINTER(ctypes.c_float)),
+                    shape=(info.n_elems,),
+                ).copy()    # 必须 copy：下面 release 之后这块内存就无效了
+                arr = flat.reshape(info.shape)
+                if info.is_nhwc:
+                    # 统一成 NCHW：YOLO 系列的后处理都按 channel-first 写。
+                    arr = np.transpose(arr, (0, 3, 1, 2))
+                result.append(arr)
+        finally:
+            self._lib.rknn_outputs_release(self._ctx, self.n_output, outputs)
+        return result
+
+    def release(self):
+        if self._ctx is not None:
+            self._lib.rknn_destroy(self._ctx)
+            self._ctx = None
+        return 0
+
+
+# --------------------------------------------------------------------- 门面 ----
+
+
+class RKNNLite(_Runtime):
+    """官方 ``rknn-toolkit-lite2.RKNNLite`` 的兼容实现（只含推理）。"""
+
+    NPU_CORE_AUTO = NPU_CORE_AUTO
+    NPU_CORE_0 = NPU_CORE_0
+    NPU_CORE_1 = NPU_CORE_1
+    NPU_CORE_2 = NPU_CORE_2
+    NPU_CORE_0_1 = NPU_CORE_0_1
+    NPU_CORE_0_1_2 = NPU_CORE_0_1_2
+    NPU_CORE_ALL = NPU_CORE_ALL
+
+    def __init__(self, verbose=False, lib_path=None):
+        super(RKNNLite, self).__init__(lib_path=lib_path, verbose=verbose)
+
+    def inference(self, inputs, data_type="float32", data_format="nhwc",
+                  inputs_pass_through=None):
+        # 官方 lite2 的默认 data_type 是 float32；uint8 输入要显式给。
+        return super(RKNNLite, self).inference(
+            inputs, data_type=data_type, data_format=data_format,
+            inputs_pass_through=inputs_pass_through,
+        )
+
+
+class RKNN(_Runtime):
+    """``rknn_model_zoo`` 里 ``rknn.api.RKNN`` 用法的兼容实现。
+
+    与 :class:`RKNNLite` 的差别只在默认参数：zoo 的脚本习惯
+    ``init_runtime(target="rk3588")`` 与 ``inference(inputs=[img])``。
+    模型转换（load_onnx/build/export_rknn）是开发机上的操作，这里明确不支持。
+    """
+
+    NPU_CORE_AUTO = NPU_CORE_AUTO
+    NPU_CORE_0 = NPU_CORE_0
+    NPU_CORE_1 = NPU_CORE_1
+    NPU_CORE_2 = NPU_CORE_2
+    NPU_CORE_0_1 = NPU_CORE_0_1
+    NPU_CORE_0_1_2 = NPU_CORE_0_1_2
+    NPU_CORE_ALL = NPU_CORE_ALL
+
+    def __init__(self, verbose=False, lib_path=None):
+        super(RKNN, self).__init__(lib_path=lib_path, verbose=verbose)
+
+    def inference(self, inputs, data_type="uint8", data_format="nhwc",
+                  inputs_pass_through=None):
+        # zoo 的 YOLO demo 一律喂 uint8 NHWC（前处理由驱动做）。
+        return super(RKNN, self).inference(
+            inputs, data_type=data_type, data_format=data_format,
+            inputs_pass_through=inputs_pass_through,
+        )
+
+    # -- 只存在于开发机的模型转换接口：显式拒绝，别让人以为"跑通了" ----
+    def _host_only(self, *args, **kwargs):
+        raise NotImplementedError(
+            "模型转换（load_onnx/load_tflite/load_pytorch/build/export_rknn）"
+            "是开发机上 rknn-toolkit2 的职责，板上只有运行时"
+        )
+
+    load_onnx = _host_only
+    load_tflite = _host_only
+    load_pytorch = _host_only
+    load_tensorflow = _host_only
+    load_caffe = _host_only
+    load_darknet = _host_only
+    build = _host_only
+    export_rknn = _host_only
+    accuracy_analysis = _host_only
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\share\semi_auto_match_24\python\rknn\__init__.py ===
+
+"""``rknn`` 兼容层：在没有 rknn-toolkit-lite2 的 OpenHarmony 板子上提供推理接口。
+
+本板是 musl / OHOS ABI，官方 ``rknn-toolkit-lite2`` 只有 glibc 轮子，装不上。
+本包用 ctypes 绑定厂商的 ``librknnrt.so``，暴露官方 API 的推理子集：
+
+    from rknn.api import RKNNLite
+
+    rknn = RKNNLite()
+    rknn.load_rknn("/path/model.rknn")
+    rknn.init_runtime(core_mask=RKNNLite.NPU_CORE_0_1_2)
+    outputs = rknn.inference(inputs=[bgr_or_rgb_uint8], data_type="uint8", data_format="nhwc")
+    rknn.release()
+
+安装位置与可见性
+----------------
+本包随 semi_auto_match_24 装在
+``<prefix>/share/semi_auto_match_24/python/rknn/``，
+由 ``nodes/rknn_yolo.py`` 自己把该目录塞进 ``sys.path``（见该模块的
+``_ensure_rknn_importable``）。这样做而不是装进 site-packages，是为了：
+
+* 不遮蔽将来真正安装的官方 ``rknn`` 包 —— 同名顶层模块一定会遮蔽，出问题很难查；
+* 交叉编译期不需要 ``catkin_python_setup()``（那会在构建机上跑 setup.py）。
+
+如果确实需要全局可见（例如要跑 rknn_model_zoo 的 demo），
+参考 auto_match 包里的 ``scripts/install_rknn_shim.sh`` 显式安装，
+并注意上述遮蔽风险。
+"""
+
+from .api import (  # noqa: F401
+    RKNN,
+    RKNNLite,
+    TensorInfo,
+    DEFAULT_LIB,
+    NPU_CORE_0,
+    NPU_CORE_0_1,
+    NPU_CORE_0_1_2,
+    NPU_CORE_1,
+    NPU_CORE_2,
+    NPU_CORE_ALL,
+    NPU_CORE_AUTO,
+    core_mask_from_string,
+    error_name,
+)
+
+__version__ = "0.1.0"
+
+# 官方包一旦装上，同名遮蔽就会发生；这里主动提示，而不是让它静默生效。
+__shim__ = True
+
+__all__ = [
+    "RKNN",
+    "RKNNLite",
+    "TensorInfo",
+    "DEFAULT_LIB",
+    "NPU_CORE_AUTO",
+    "NPU_CORE_0",
+    "NPU_CORE_1",
+    "NPU_CORE_2",
+    "NPU_CORE_0_1",
+    "NPU_CORE_0_1_2",
+    "NPU_CORE_ALL",
+    "core_mask_from_string",
+    "error_name",
+    "__version__",
+]
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\share\semi_auto_match_24\test\check_launch_refs.py ===
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""launch 静态引用检查 —— 不需要 ROS、不需要板子。
+
+板端最典型的失败是 `cannot launch node of type [pkg/node]`：launch 里引用了
+一个**在 build.sh 的 skiplist 里、因此根本没编出来**的包。这类错误在交叉编译
+阶段完全看不出来，只有上了板才炸。本脚本把三件事提前查掉：
+
+1. 每个 ``$(arg X)`` / ``arg('X')`` 都有出处（本文件声明，或 include 传参）；
+2. 每个 ``$(find PKG)`` / ``<node pkg=...>`` 指向的包真的存在
+   （工作区、或 SDK 预装的系统包，例如 rviz / map_server）；
+3. 引用到的包没有落在 skiplist 里。``swiftpro`` 是已知例外：它在 skiplist 里
+   （交叉编译不过），但板端是 prebuilt 装好的。
+
+用法::
+
+    python3 test/check_launch_refs.py                      # 查本包 launch/*.launch
+    python3 test/check_launch_refs.py path/to/a.launch ... # 查指定文件
+
+环境变量 ``SPARK_SDK_DIR`` 可覆盖 SDK 解压目录（默认 /home/m-robots/sdk-persist）。
+"""
+
+import glob
+import os
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PACKAGE_DIR = os.path.dirname(HERE)
+SRC_DIR = os.path.dirname(os.path.dirname(PACKAGE_DIR))          # <repo>/spark_noetic/src
+REPO_DIR = os.path.dirname(os.path.dirname(SRC_DIR))             # <repo>
+SDK_ROOT = os.environ.get("SPARK_SDK_DIR", "/home/m-robots/sdk-persist")
+SDK_SHARE = os.path.join(SDK_ROOT, "usr", "share")
+BUILD_SH = os.path.join(REPO_DIR, "build.sh")
+
+ARG_REF = re.compile(r"\$\(arg ([A-Za-z0-9_]+)\)")
+ARG_EVAL = re.compile(r"arg\('([A-Za-z0-9_]+)'\)")
+FIND_REF = re.compile(r"\$\(find ([A-Za-z0-9_]+)\)")
+
+# 板上 prebuilt 装好的，即便在 skiplist 里也能 $(find) 到
+PREBUILT_ON_BOARD = {"swiftpro", "swift_moveit_config", "pro_moveit_config"}
+
+failures = []
+warnings = []
+
+
+def workspace_packages():
+    found = set()
+    for root, dirs, files in os.walk(SRC_DIR):
+        if "package.xml" in files:
+            found.add(os.path.basename(root))
+        dirs[:] = [d for d in dirs if d not in (".git", "build", "devel")]
+    return found
+
+
+def sdk_packages():
+    """SDK 里预装的系统 ROS 包（rviz / map_server / tf ... 不在工作区里）。"""
+    found = set()
+    if not os.path.isdir(SDK_SHARE):
+        return found
+    for name in os.listdir(SDK_SHARE):
+        if os.path.exists(os.path.join(SDK_SHARE, name, "package.xml")):
+            found.add(name)
+    return found
+
+
+def skiplist():
+    try:
+        with open(BUILD_SH, "r") as handle:
+            text = handle.read()
+    except IOError:
+        return set()
+    block = re.search(r"#skiplist(.*?)#cmake-args", text, re.S)
+    if not block:
+        return set()
+    return set(re.findall(r'config_args\+=\("([^"]+)"\)', block.group(1)))
+
+
+def node_exists(pkg, typ):
+    for pattern in ("*/" + pkg + "/**/" + typ, "*/**/" + pkg + "/**/" + typ):
+        if glob.glob(os.path.join(SRC_DIR, pattern), recursive=True):
+            return True
+    # SDK 预装包的可执行文件在 <sdk>/usr/lib/<pkg>/ 下（例如 rviz）
+    if glob.glob(os.path.join(SDK_ROOT, "usr", "lib", pkg, typ)):
+        return True
+    return bool(glob.glob(os.path.join(SDK_SHARE, pkg, "**", typ), recursive=True))
+
+
+def check_file(path, packages, skipped):
+    root = ET.parse(path).getroot()
+    name = os.path.basename(path)
+
+    # 只有 <launch> 的直接子 <arg> 才是"声明"；<include> 里的 <arg> 是传参
+    declared = {a.get("name") for a in root.findall("arg") if a.get("name")}
+    passed = {a.get("name") for inc in root.iter("include")
+              for a in inc.findall("arg") if a.get("name")}
+    with open(path, "r") as handle:
+        text = handle.read()
+
+    used = set(ARG_REF.findall(text)) | set(ARG_EVAL.findall(text))
+    undeclared = sorted(used - declared - passed)
+    if undeclared:
+        failures.append("%s: 用了没声明的 arg: %s" % (name, undeclared))
+    else:
+        print("  OK   %s: %d 个 arg 声明、%d 个 include 传参，引用全部有出处"
+              % (name, len(declared), len(passed)))
+
+    unused = sorted(declared - used)
+    if unused:
+        warnings.append("%s: 声明了但没用到的 arg（确认是刻意保留）: %s" % (name, unused))
+
+    for pkg in sorted(set(FIND_REF.findall(text))):
+        if pkg not in packages:
+            failures.append("%s: $(find %s) 找不到这个包" % (name, pkg))
+        elif pkg in skipped and pkg not in PREBUILT_ON_BOARD:
+            failures.append("%s: $(find %s) 在 skiplist 里，板端不会有它" % (name, pkg))
+
+    for node in root.iter("node"):
+        pkg, typ = node.get("pkg"), node.get("type")
+        if not pkg:
+            continue
+        if pkg not in packages:
+            failures.append("%s: <node pkg=%r> 找不到这个包" % (name, pkg))
+            continue
+        if pkg in skipped and pkg not in PREBUILT_ON_BOARD:
+            failures.append("%s: <node pkg=%r> 在 skiplist 里，板端不会有它" % (name, pkg))
+        if typ and not node_exists(pkg, typ):
+            warnings.append("%s: <node pkg=%r type=%r> 没找到同名可执行文件"
+                            % (name, pkg, typ))
+
+
+def main(argv):
+    targets = argv or sorted(glob.glob(os.path.join(PACKAGE_DIR, "launch", "*.launch")))
+    if not targets:
+        print("没有要检查的 launch 文件")
+        return 1
+
+    packages = workspace_packages() | sdk_packages()
+    skipped = skiplist()
+    print("工作区包 %d 个；SDK 预装包 %d 个；skiplist %d 个；待查文件 %d 个"
+          % (len(workspace_packages()), len(sdk_packages()), len(skipped), len(targets)))
+    print("")
+    for path in targets:
+        check_file(path, packages, skipped)
+
+    print("")
+    for w in warnings:
+        print("WARN %s" % w)
+    if failures:
+        for f in failures:
+            print("FAIL %s" % f)
+        return 1
+    print("launch 引用检查通过")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\share\semi_auto_match_24\test\gen_rviz.py ===
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""生成 semi_auto_match_24 自己的 rviz 布局（``rviz/semi_auto.rviz``）。
+
+    python3 test/gen_rviz.py [fixed_frame]      # 默认 odom
+
+为什么不能直接抄现成的
+----------------------
+* ``spark_gmapping_d435.rviz`` 是 **SLAM 布局** —— Fixed Frame = ``map``，
+  还带 /map 上的 Map 显示。而 ``semi_auto.launch`` **不启动 SLAM / map_server**，
+  ``map`` 帧根本不存在，rviz 会 ``Fixed Frame [map] does not exist`` 然后
+  3D 视图什么都不画（上板实测就是"画面一片空白/发白"）。
+* ``auto_match.rviz``（2026 版）同样是 ``map`` 中心 —— 但**它的 launch 会起
+  SLAM 或 map_server**，所以那份没问题，抄过来就有问题。
+
+本脚本的做法
+------------
+拿 ``spark_description/rviz/urdf.rviz`` 当底 —— 那是**官方的"看机器人"布局**，
+Fixed Frame 就是本 launch 真实存在的 ``odom``，而且它恰好配对
+``joint_state_publisher`` + ``robot_state_publisher`` 这一对节点；
+再把 PointCloud2 面板换成雷达 + 两路图像：
+
+    Grid / RobotModel / TF(关) / LaserScan(/scan)
+    / Image(/camera/color/image_raw) / Image(/debug_image)      Fixed Frame: odom
+
+LaserScan 与 Image 的字段块直接从 ``auto_match.rviz`` 里**整块搬**（同板同
+rviz 版本，字段 schema 一定对），不手写。
+
+本 launch 实测存在的帧：``odom``（spark_base_server）、``base_link`` /
+``laser`` / ``camera_*``（robot_state_publisher 与 realsense）。**没有 ``map``。**
+"""
+
+import io
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PACKAGE_DIR = os.path.dirname(HERE)
+SRC_DIR = os.path.dirname(os.path.dirname(PACKAGE_DIR))
+URDF_RVIZ = os.path.join(SRC_DIR, "spark", "spark_description", "rviz", "urdf.rviz")
+AUTO_RVIZ = os.path.join(SRC_DIR, "spark_app", "auto_match_25", "auto_match",
+                         "rviz", "auto_match.rviz")
+OUT = os.path.join(PACKAGE_DIR, "rviz", "semi_auto.rviz")
+
+FRAME = sys.argv[1] if len(sys.argv) > 1 else "odom"
+
+
+def read_lines(path):
+    with io.open(path, "r", encoding="utf-8") as handle:
+        return handle.read().split("\n")
+
+
+def _is_block_end(line):
+    """块内字段缩进 6 空格（嵌套键 8 空格）；遇到空行或缩进不足就是块结束。
+
+    注意不能写成 ``line.startswith("  ")`` —— 6 空格的字段也"以两个空格开头"，
+    那样每块都只剩第一行（踩过）。
+    """
+    if not line.strip():
+        return False
+    return not line.startswith("      ")
+
+
+def extract_block(lines, class_marker):
+    """按缩进切出一个顶层显示项。
+
+    两种写法都要认：
+    * ``    - Alpha: 1`` … ``      Class: rviz/X``   （块从上一行开始）
+    * ``    - Class: rviz/X``                        （块就从这一行开始）
+    """
+    start = None
+    inline = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == "Class: " + class_marker:
+            start, inline = i, False
+            break
+        if stripped == "- Class: " + class_marker:
+            start, inline = i, True
+            break
+    if start is None:
+        raise SystemExit("找不到 %s 的显示项" % class_marker)
+
+    if inline:
+        begin = start
+    else:
+        begin = start
+        while begin > 0 and not lines[begin].startswith("    - "):
+            begin -= 1
+        if not lines[begin].startswith("    - "):
+            raise SystemExit("%s 的显示项找不到起始行" % class_marker)
+
+    end = start + 1
+    while end < len(lines) and not _is_block_end(lines[end]):
+        end += 1
+    return lines[begin:end]
+
+
+def set_key(block, key, value):
+    """把块里某个键的值改掉（保留缩进）。"""
+    out = []
+    for line in block:
+        if line.strip().startswith(key + ":"):
+            indent = line[:len(line) - len(line.lstrip())]
+            out.append("%s%s: %s" % (indent, key, value))
+        else:
+            out.append(line)
+    return out
+
+
+# 视角与窗口：官方 urdf.rviz 存的是 Distance 6.64m / 窗口 1859x1056，
+# 而板上的 Xvfb 是 1100x650 —— 直接照搬会把机器人挤到画面角落，
+# 而且相机盯的是 odom 原点（机器人开走后就不在画面里了）。
+# 这里改成：相机跟着 base_link 走，距离 2.5m（对 34cm 的底盘刚好），
+# 窗口尺寸对齐板上那块虚拟屏。
+VIEW_FIXES = [
+    ("      Target Frame: <Fixed Frame>", "      Target Frame: base_link"),
+    ("      Distance: 6.64356", "      Distance: 2.50000"),
+    ("      Pitch: 0.399797", "      Pitch: 0.350000"),
+    ("  Width: 1859", "  Width: 1100"),
+    ("  Height: 1056", "  Height: 650"),
+    ("  X: 61", "  X: 0"),
+    ("  Y: 24", "  Y: 0"),
+]
+
+
+def apply_view_fixes(lines):
+    text = "\n".join(lines)
+    applied = []
+    for old, new in VIEW_FIXES:
+        if old in text:
+            text = text.replace(old, new, 1)
+            applied.append(new.strip())
+    return text.split("\n"), applied
+
+
+def find_block_range(lines, class_marker):
+    begin = None
+    for i, line in enumerate(lines):
+        if line.strip() == "Class: " + class_marker:
+            begin = i
+            break
+    if begin is None:
+        raise SystemExit("找不到 %s 的显示项" % class_marker)
+    while begin > 0 and not lines[begin].startswith("    - "):
+        begin -= 1
+    end = begin + 1
+    while end < len(lines) and not _is_block_end(lines[end]):
+        end += 1
+    return begin, end
+
+
+def main():
+    urdf = read_lines(URDF_RVIZ)
+    auto = read_lines(AUTO_RVIZ)
+
+    laser = set_key(set_key(extract_block(auto, "rviz/LaserScan"),
+                            "Name", "LaserScan"), "Topic", "/scan")
+    cam = set_key(set_key(extract_block(auto, "rviz/Image"),
+                          "Name", "Camera"), "Image Topic", "/camera/color/image_raw")
+    det = set_key(set_key(extract_block(auto, "rviz/Image"),
+                          "Name", "Detect"), "Image Topic", "/debug_image")
+
+    begin, end = find_block_range(urdf, "rviz/PointCloud2")
+    # 不用深度点云：VNC 上渲染慢，本赛项也用不到；要看随时能在面板里加回来
+    new = urdf[:begin] + laser + cam + det + urdf[end:]
+
+    for i, line in enumerate(new):
+        if line.strip().startswith("Fixed Frame:"):
+            indent = line[:len(line) - len(line.lstrip())]
+            new[i] = "%sFixed Frame: %s" % (indent, FRAME)
+
+    new, applied = apply_view_fixes(new)
+    print("视角/窗口修正: %s" % (", ".join(applied) if applied else "（无）"))
+
+    with io.open(OUT, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(new))
+
+    with io.open(OUT, "r", encoding="utf-8") as handle:
+        text = handle.read()
+    checks = {
+        "Fixed Frame 是 %s" % FRAME: ("Fixed Frame: %s" % FRAME) in text,
+        "没有把 map 当 Fixed Frame": "Fixed Frame: map" not in text,
+        "有 RobotModel": "Class: rviz/RobotModel" in text,
+        "有 LaserScan(/scan)": "Class: rviz/LaserScan" in text and "Topic: /scan" in text,
+        "有 Image(/camera/color/image_raw)": "Image Topic: /camera/color/image_raw" in text,
+        "有 Image(/debug_image)": "Image Topic: /debug_image" in text,
+        "没有 PointCloud2": "Class: rviz/PointCloud2" not in text,
+        "相机跟着 base_link": "Target Frame: base_link" in text,
+        "窗口对齐 1100x650": "  Width: 1100" in text and "  Height: 650" in text,
+    }
+    for name, ok in checks.items():
+        print("  [%s] %s" % ("OK" if ok else "FAIL", name))
+    if not all(checks.values()):
+        return 1
+    print("已生成 %s（%d 行）" % (OUT, len(new)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\share\semi_auto_match_24\test\probe_grasp_colors.py ===
+
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""量一量 grasp.py 的水源（蓝）/红块检测到底有没有命中，以及计数器会不会被互相清零。
+
+完全照抄 grasp.py 的两条 HSV 流水线与"最近轮廓"选法，只是把内部状态打印出来。
+**只订阅话题，不改板端任何东西**，可以边跑比赛程序边量。
+
+用法（板上）::
+
+    run python3 test/probe_grasp_colors.py [帧数]
+
+判据：
+* 蓝轮廓 0/N 且全图 S 均值很低  -> 画面里没有蓝色目标，把水源放进相机视野
+* 蓝轮廓有但中心每帧跳 >4px      -> 目标在动 / 光斑不稳
+* 有蓝有轮廓但 S <90             -> 目标不是饱和蓝（白 / 浅蓝 / 过曝），要放宽阈值
+"""
+
+import math
+import sys
+
+import cv2
+import numpy as np
+import rospy
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image
+
+TOPIC = "/camera/color/image_raw"
+WINDOW = 60
+
+
+def pipeline(cv_image, lower, upper, thresh_val):
+    """照抄 grasp.py：HSV -> inRange -> 取 H 通道 -> blur -> threshold
+    -> CLOSE(25x25) -> erode x4 -> dilate x4 -> findContours。"""
+    hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
+    chan = cv2.bitwise_and(hsv, hsv, mask=mask)[:, :, 0]
+    blurred = cv2.blur(chan, (9, 9))
+    _, thresh = cv2.threshold(blurred, thresh_val, 255, cv2.THRESH_BINARY)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+    closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    closed = cv2.erode(closed, None, iterations=4)
+    closed = cv2.dilate(closed, None, iterations=4)
+    contours = cv2.findContours(closed, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[0]
+    return contours, mask
+
+
+def nearest_centre(contours):
+    """照抄 grasp.py：取离 (320, 480) 最近的轮廓的中心。返回 (x, y) 或 None。"""
+    if not contours:
+        return None
+    dis_min = 640
+    best = None
+    for c in contours:
+        rect = cv2.minAreaRect(c)
+        box = cv2.boxPoints(rect)
+        box = np.intp(box)
+        x_mid = (box[0][0] + box[2][0] + box[1][0] + box[3][0]) / 4
+        y_mid = (box[0][1] + box[2][1] + box[1][1] + box[3][1]) / 4
+        d = math.sqrt((x_mid - 320) ** 2 + (480 - y_mid) ** 2)
+        if d < dis_min:
+            dis_min = d
+            best = (x_mid, y_mid)
+    return best
+
+
+class Probe(object):
+    def __init__(self):
+        self.frames = 0
+        self.bridge = CvBridge()
+        # 照抄 grasp.py 的两个计数器语义：**共用一个 water_found_count**
+        self.shared_count = 0
+        self.blue_only_count = 0
+        self.red_only_count = 0
+        self.found_water_shared = False
+        self.found_water_blue_only = False
+        self.found_red_only = False
+        self.blue_prev = (0.0, 0.0)
+        self.red_prev = (0.0, 0.0)
+        self.saved = False
+        self.blue_hits = 0
+        self.red_hits = 0
+        self.blue_stable = 0
+        self.red_stable = 0
+        self.blue_trace = []
+        self.red_trace = []
+        rospy.Subscriber(TOPIC, Image, self.cb, queue_size=1, buff_size=2 ** 24)
+
+    def cb(self, msg):
+        try:
+            img = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+        except Exception as exc:
+            print("图像转换失败: %s" % exc)
+            return
+        self.frames += 1
+
+        blue, blue_mask = pipeline(img, [95, 90, 80], [130, 255, 255], 90)
+        red, red_mask = pipeline(img, [146, 80, 46], [180, 255, 255], 20)
+        bc = nearest_centre(blue)
+        rc = nearest_centre(red)
+
+        # ---- image_cb（蓝）----
+        if blue:
+            self.blue_hits += 1
+            if bc:
+                self.blue_trace.append((round(bc[0], 1), round(bc[1], 1)))
+                if abs(bc[0] - self.blue_prev[0]) <= 4 and abs(bc[1] - self.blue_prev[1]) <= 4:
+                    self.blue_stable += 1
+                    self.blue_only_count += 1
+                    self.shared_count += 1
+                else:
+                    self.blue_only_count = 0
+                    self.shared_count = 0
+                self.blue_prev = bc
+        else:
+            self.blue_only_count = 0
+            self.shared_count = 0
+
+        # ---- image_cb_red（红）—— 它也在动同一个 shared_count ----
+        if red:
+            self.red_hits += 1
+            if rc:
+                self.red_trace.append((round(rc[0], 1), round(rc[1], 1)))
+                if abs(rc[0] - self.red_prev[0]) <= 4 and abs(rc[1] - self.red_prev[1]) <= 4:
+                    self.red_stable += 1
+                    self.red_only_count += 1
+                    self.shared_count += 1
+                else:
+                    self.red_only_count = 0
+                    self.shared_count = 0
+                self.red_prev = rc
+        else:
+            self.shared_count = 0          # ★ 红没找到 -> 把蓝攒的计数也清了
+            self.red_only_count = 0
+
+        if self.blue_only_count >= 30:
+            self.found_water_blue_only = True
+        if self.red_only_count >= 10:
+            self.found_red_only = True
+        if self.shared_count >= 30:
+            self.found_water_shared = True
+
+        if not self.saved:
+            self.saved = True
+            cv2.imwrite("/data/local/tmp/probe_frame.png", img)
+            cv2.imwrite("/data/local/tmp/probe_blue_mask.png", blue_mask)
+            cv2.imwrite("/data/local/tmp/probe_red_mask.png", red_mask)
+
+        if self.frames % 15 == 0:
+            print("  帧 %-3d 蓝轮廓=%-3d 蓝中心=%-18s 蓝计数=%-3d 红轮廓=%-3d 红中心=%-18s 共享计数=%d"
+                  % (self.frames, len(blue), str(bc), self.blue_only_count,
+                     len(red), str(rc), self.shared_count))
+
+
+def main(argv):
+    want = int(argv[0]) if argv else WINDOW
+    rospy.init_node("probe_water", anonymous=True)
+    probe = Probe()
+    print("订阅 %s，收 %d 帧……（相机没在发图会在这里卡住）" % (TOPIC, want))
+    rate = rospy.Rate(30)
+    while not rospy.is_shutdown() and probe.frames < want:
+        rate.sleep()
+
+    print("")
+    print("===== 结果 =====")
+    print("收到帧数            : %d" % probe.frames)
+    print("蓝色有轮廓的帧      : %d / %d  (%.0f%%)"
+          % (probe.blue_hits, probe.frames,
+             100.0 * probe.blue_hits / max(1, probe.frames)))
+    print("蓝色中心稳定(<=4px) : %d" % probe.blue_stable)
+    print("红色有轮廓的帧      : %d / %d  (%.0f%%)"
+          % (probe.red_hits, probe.frames,
+             100.0 * probe.red_hits / max(1, probe.frames)))
+    print("红色中心稳定(<=4px) : %d" % probe.red_stable)
+    print("")
+    print("蓝中心轨迹(前 12)   : %s" % probe.blue_trace[:12])
+    print("红中心轨迹(前 12)   : %s" % probe.red_trace[:12])
+    print("")
+    print("★ 按 grasp.py 现在的写法（两个回调共用 water_found_count）:")
+    print("    found_water = %s   （共享计数最终 %d）"
+          % (probe.found_water_shared, probe.shared_count))
+    print("★ 如果蓝红各用各的计数器:")
+    print("    found_water(蓝) = %s   found_red = %s"
+          % (probe.found_water_blue_only, probe.found_red_only))
+    print("")
+    print("已存 /data/local/tmp/probe_{frame,blue_mask,red_mask}.png")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\share\semi_auto_match_24\test\reachable_area.py ===
+
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""算出"画面里哪些区域机械臂够得到"，用来指导物体摆放。
+
+    python3 test/reachable_area.py                      # 打印可达区域图
+    run python3 .../test/reachable_area.py --overlay    # 板上跑，抓一帧相机并把可达区域画上去
+
+为什么需要：抓取位置是"像素 -> 标定 -> 机械臂坐标"，但**机械臂够不到所有位置**。
+够不到时固件不接受那个位姿，表现为**机械臂不动**，而 grasp() 后面照样开泵、
+照样抬到 (230,0,160) —— 看起来就像"没抓就跑了"，同时 swiftpro_rviz_node 会刷
+"Inverse kinematic is wrong"。
+
+实测（640x480，标定用板上 thefile.txt，z=20 与 -45 都要可达）：
+
+* 画面**最上方约 1/4**（行 < ~110）整行都够不到 —— pos.x 超出臂展
+* 行 112~300 只有**中间一条横带**可达，越往下越宽
+* **行 320~400 整行都可达** ← 物体放这里最稳
+* 行 > 410 时**底部中央**（列约 280~440）出现缺口 —— 离底座太近，机械臂折不过来
+"""
+
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PACKAGE_DIR = os.path.dirname(HERE)
+for _cand in (os.path.join(PACKAGE_DIR, "nodes"),
+              "/data/local/release/usr/lib/semi_auto_match_24"):
+    if os.path.isdir(_cand):
+        sys.path.insert(0, _cand)
+
+from arm_ik import pixel_to_arm, pixel_reachable   # noqa: E402
+
+# 与 config/grasp_heights.yaml 保持一致
+Z_UP, Z_DOWN = 20.0, -45.0
+Z_LIST = (Z_UP, Z_DOWN)
+W, H = 640, 480
+
+
+def print_map():
+    print("=" * 74)
+    print("画面里哪些区域够得到（要求 z=%.0f 和 z=%.0f 都可达）" % Z_LIST)
+    print("=" * 74)
+    print("# = 可达    . = 够不到     横轴=像素列 0..%d，纵轴=像素行 0..%d" % (W - 1, H - 1))
+    print()
+    for row in range(0, H, 16):
+        cells = []
+        for col in range(0, W, 40):
+            ok = all(pixel_reachable(r, c, Z_LIST)
+                     for r in range(row, min(row + 16, H), 4)
+                     for c in range(col, min(col + 40, W), 8))
+            cells.append("#" if ok else ".")
+        print("行=%-4d %s" % (row, "   ".join(cells)))
+
+    print()
+    print("=" * 74)
+    print("逐行看可达的列范围")
+    print("=" * 74)
+    for row in range(0, H, 30):
+        ax = pixel_to_arm(row, 0)[0]
+        good = [c for c in range(0, W, 5) if pixel_reachable(row, c, Z_LIST)]
+        if good:
+            print("  行=%3d  pos.x=%7.2f  可达列 %3d ~ %3d  (%d/%d)"
+                  % (row, ax, min(good), max(good), len(good), W // 5))
+        else:
+            print("  行=%3d  pos.x=%7.2f  ★ 整行都够不到" % (row, ax))
+    return 0
+
+
+def live_overlay():
+    """订阅相机抓一帧，把可达区域叠上去存 PNG。只订阅，不改任何东西。"""
+    import cv2
+    import numpy as np
+    import rospy
+    from cv_bridge import CvBridge
+    from sensor_msgs.msg import Image
+
+    topic = rospy.get_param("~image_topic", "/camera/color/image_raw")
+    out = rospy.get_param("~out", "/data/local/tmp/reachable_area.png")
+    rospy.init_node("reachable_area", anonymous=True)
+    bridge = CvBridge()
+    box = {"img": None}
+
+    def cb(msg):
+        if box["img"] is None:
+            try:
+                box["img"] = bridge.imgmsg_to_cv2(msg, "bgr8")
+            except Exception as exc:                    # noqa: BLE001
+                rospy.logwarn("图像转换失败: %s", exc)
+
+    rospy.Subscriber(topic, Image, cb, queue_size=1, buff_size=2 ** 24)
+    print("等一帧 %s ……" % topic)
+    rate = rospy.Rate(20)
+    for _ in range(200):
+        if box["img"] is not None or rospy.is_shutdown():
+            break
+        rate.sleep()
+    if box["img"] is None:
+        print("没收到图像 —— 相机没在发？")
+        return 1
+
+    img = box["img"]
+    h, w = img.shape[:2]
+    overlay = img.copy()
+    step = 4
+    reach = np.zeros((h, w), dtype=bool)
+    for r in range(0, h, step):
+        for c in range(0, w, step):
+            if pixel_reachable(r, c, Z_LIST):
+                reach[r:r + step, c:c + step] = True
+    # 可达区偏绿、不可达区偏红
+    overlay[reach] = (overlay[reach] * 0.55 + np.array([0, 200, 0]) * 0.45).astype(np.uint8)
+    overlay[~reach] = (overlay[~reach] * 0.55 + np.array([0, 0, 220]) * 0.45).astype(np.uint8)
+    blend = cv2.addWeighted(img, 0.45, overlay, 0.55, 0)
+    cv2.putText(blend, "green=reachable  red=unreachable", (10, 24),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    cv2.imwrite(out, blend)
+    print("已存 %s（绿=够得到，红=够不到）" % out)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(live_overlay() if "--overlay" in sys.argv else print_map())
+
+
+=== FILE: D:\Загрузки\ROS Comp\ROS Comp\M-Robots 半自动赛资料\比赛程序\share\semi_auto_match_24\test\test_rknn_yolo_postprocess.py ===
+
+#!/usr/bin/env python
+"""semi_auto_match_24 的离线回归测试 —— 不需要 NPU、不需要板子、不需要 ROS。
+
+分两层，跑法不同：
+
+**第一层（纯标准库，任何机器上都能跑）** —— 钉住本赛项最容易静默出错的两条契约：
+
+    python3 test/test_rknn_yolo_postprocess.py
+
+* 类别表契约：``grasp.py`` 拿 ``obj_id == 56`` 当西兰花，而 YOLOv5（COCO-80）
+  给的西兰花下标是 50 —— 标签表的第 2 列必须完成这个换算，否则抓西兰花那条
+  分支永远不触发，且**不会报任何错**。
+* 坐标契约：ROI 内框中心换算回整幅图像坐标的算法必须与原 ``detect.py`` 一致。
+
+**第二层（需要 numpy + cv2）** —— YOLOv5 解码/NMS/letterbox 的回归：
+
+    # 板上（numpy 是板端运行时依赖，随镜像装好）
+    run python3 test/test_rknn_yolo_postprocess.py
+
+    # 开发机上 SDK 里只有 aarch64 的 cv2、且没有 numpy，所以这一层跑不了，
+    # 会打印 [SKIP] 并以 0 退出；第一层照常执行。
+"""
+
+import os
+import random
+import shutil
+import sys
+import tempfile
+
+NODES_DIR = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), os.pardir, "nodes"))
+sys.path.insert(0, NODES_DIR)
+
+from roi_map import centre_to_source, crop_slice, parse_offset, parse_roi  # noqa: E402
+
+# numpy + cv2 只有板上齐备：SDK 的 target sysroot 里只有 aarch64 的 cv2，
+# 而 numpy 根本不在 SDK 里（它是板端运行时依赖）。
+try:
+    import numpy as np
+    from rknn_yolo import LetterBox, RknnYoloDetector, load_id_map, load_labels
+except ImportError as _exc:            # pragma: no cover - 取决于跑在哪台机器
+    np = None
+    RUNTIME_SKIP = str(_exc)
+else:
+    RUNTIME_SKIP = None
+
+PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LABELS_PATH = os.path.join(PACKAGE_DIR, "config", "yolo", "coco_labels.txt")
+
+FAILURES = []
+
+
+def check(name, condition, detail=""):
+    status = "PASS" if condition else "FAIL"
+    print("[%s] %s%s" % (status, name, ("  " + detail) if detail else ""))
+    if not condition:
+        FAILURES.append(name)
+
+
+# ===========================================================================
+# 第一层：纯标准库 —— 本赛项的两条契约
+# ===========================================================================
+
+def read_label_table(path):
+    """按标签文件自己的格式（``下标 外部id 名字``）读出来，不依赖被测代码。"""
+    rows = []
+    with open(path, "r") as handle:
+        for raw in handle:
+            line = raw.split("#", 1)[0].strip()
+            if not line:
+                continue
+            index, external, name = line.split(None, 2)
+            rows.append((int(index), int(external), name))
+    return rows
+
+
+def test_label_table_contract():
+    """``config/yolo/coco_labels.txt`` 必须把 COCO-80 下标换成原程序的 TF 90 编号。
+
+    原 ``detect.py`` 发的是 ``mscoco_label_map.pbtxt`` 的编号（西兰花 56、
+    wine glass 46），``grasp.py`` 里写死了 56。这里直接断言标签表的内容 ——
+    改这张表是最容易把程序改哑的操作，所以用数据断言钉住。
+    """
+    rows = read_label_table(LABELS_PATH)
+    check("表/共 80 行", len(rows) == 80, "实际 %d" % len(rows))
+    if len(rows) != 80:
+        return
+    check("表/模型下标 0..79 连续", [r[0] for r in rows] == list(range(80)),
+          "首尾=%s" % ([rows[0][0], rows[-1][0]],))
+
+    check("表/下标 50 是 broccoli", rows[50][2] == "broccoli", rows[50][2])
+    check("表/西兰花对外 id 是 56（grasp.py 比的就是它）", rows[50][1] == 56,
+          "rows[50]=%s" % (rows[50],))
+    check("表/下标 40 是 wine glass 且对外 id 46",
+          rows[40][1] == 46 and rows[40][2] == "wine glass", "rows[40]=%s" % (rows[40],))
+
+    # 90 类编号里有 12 个空洞，所以对外 id 必须严格递增但不连续
+    externals = [r[1] for r in rows]
+    check("表/对外 id 严格递增", all(b > a for a, b in zip(externals, externals[1:])),
+          "%s..%s" % (externals[0], externals[-1]))
+
+
+def test_roi_mapping_matches_original():
+    """ROI 内框中心 → 整幅图像坐标，必须与原 ``detect.py`` 的算法一致。
+
+    原版::
+
+        image = image[160:480, 160:480]                      # 320×320
+        loc_x = int((x_min + x_max) * 320 / 2 + 0.25 * 640)  # 偏移 160
+        loc_y = int((y_min + y_max) * 320 / 2 + 0.33 * 480)  # 偏移 158.4
+
+    本实现按真实裁剪原点 (160, 160) 换算，x 方向与原版**逐像素一致**；
+    y 方向差 1.6 px（原版的 0.33*480 是近似）。把偏移设成 [160, 158.4]
+    即可逐像素复现原版 —— 这几条断言就是防止有人"顺手"改掉默认值。
+    """
+    roi = parse_roi([160, 160, 320, 320])
+    check("roi/解析出 (160,160,320,320)", roi == (160, 160, 320, 320), str(roi))
+
+    offset = parse_offset([], roi)
+    check("roi/偏移留空时用裁剪原点", offset == (160.0, 160.0), str(offset))
+    check("roi/显式偏移被接受（含小数）",
+          parse_offset([160, 158.4], roi) == (160.0, 158.4),
+          str(parse_offset([160, 158.4], roi)))
+    check("roi/偏移个数不对时明确报错",
+          _raises(lambda: parse_offset([1, 2, 3], roi), ValueError))
+
+    # 画面 640×480：ROI 装得下；640×400 就装不下
+    check("roi/画面装得下时给切片",
+          crop_slice((480, 640, 3), roi) == (slice(160, 480), slice(160, 480)),
+          str(crop_slice((480, 640, 3), roi)))
+    check("roi/画面装不下时返回 None", crop_slice((400, 640, 3), roi) is None)
+    check("roi/宽高非正时明确报错",
+          _raises(lambda: parse_roi([0, 0, 0, 10]), ValueError))
+
+    rng = random.Random(20241014)
+    mismatched_x = mismatched_y = 0
+    for _ in range(200):
+        x1, x2 = sorted((rng.uniform(0, 320), rng.uniform(0, 320)))
+        y1, y2 = sorted((rng.uniform(0, 320), rng.uniform(0, 320)))
+        got_x, got_y = centre_to_source(x1, y1, x2, y2, offset)
+
+        # 原版：归一化坐标 × ROI 边长，再按整幅宽高的比例加偏移
+        want_x = int(((x1 / 320.0) + (x2 / 320.0)) * 320 / 2 + 0.25 * 640)
+        want_y = int(((y1 / 320.0) + (y2 / 320.0)) * 320 / 2 + 0.33 * 480)
+        mismatched_x += got_x != want_x
+        mismatched_y += got_y != want_y
+
+    check("roi/x 方向与原版逐像素一致", mismatched_x == 0, "不一致 %d/200" % mismatched_x)
+    check("roi/y 方向默认比原版大 1.6px（0.33*480 是近似）", mismatched_y == 200,
+          "不一致 %d/200" % mismatched_y)
+
+    legacy = parse_offset([160, 158.4], roi)
+    samples = [(10.0, 20.0, 30.0, 40.0), (0.0, 0.0, 319.0, 319.0),
+               (5.5, 7.25, 88.0, 200.0)]
+    same_y = all(
+        centre_to_source(x1, y1, x2, y2, legacy)[1]
+        == int(((y1 / 320.0) + (y2 / 320.0)) * 320 / 2 + 0.33 * 480)
+        for x1, y1, x2, y2 in samples
+    )
+    check("roi/显式 [160,158.4] 时 y 方向也逐像素一致", same_y)
+
+
+def _raises(fn, exc_type):
+    try:
+        fn()
+    except exc_type:
+        return True
+    except Exception:
+        return False
+    return False
+
+
+# ===========================================================================
+# 第二层：需要 numpy + cv2 —— 解码 / NMS / letterbox
+# ===========================================================================
+
+def make_detector(anchors, img_size=(640, 640), conf_thres=0.25, nms_thres=0.45,
+                  sigmoid="off"):
+    """绕开 __init__（那会去加载模型）构造一个只用于解码的实例。
+
+    这是刻意的：解码数学与 NPU 无关，测试不该依赖板子上的模型文件。
+    """
+    detector = object.__new__(RknnYoloDetector)
+    detector.anchors = anchors
+    detector.img_size = img_size
+    detector.conf_thres = conf_thres
+    detector.nms_thres = nms_thres
+    detector.sigmoid = sigmoid
+    detector.id_map = None
+    detector.labels = None
+    detector.num_classes = None
+    detector.max_det = 100
+    detector.verbose = False
+    return detector
+
+
+# ------------------------------- 参考实现：rknn_model_zoo yolov5 的全量解码 ----
+
+def reference_box_process(position, anchors, img_size):
+    grid_h, grid_w = position.shape[2:4]
+    col, row = np.meshgrid(np.arange(0, grid_w), np.arange(0, grid_h))
+    col = col.reshape(1, 1, grid_h, grid_w)
+    row = row.reshape(1, 1, grid_h, grid_w)
+    grid = np.concatenate((col, row), axis=1)
+    stride = np.array([img_size[1] // grid_h, img_size[0] // grid_w]).reshape(1, 2, 1, 1)
+
+    col = col.repeat(len(anchors), axis=0)
+    row = row.repeat(len(anchors), axis=0)
+    anchor_arr = np.array(anchors)
+    anchor_arr = anchor_arr.reshape(*anchor_arr.shape, 1, 1)
+
+    box_xy = position[:, :2, :, :] * 2 - 0.5
+    box_wh = pow(position[:, 2:4, :, :] * 2, 2) * anchor_arr
+    box_xy += grid
+    box_xy *= stride
+    box = np.concatenate((box_xy, box_wh), axis=1)
+
+    xyxy = np.copy(box)
+    xyxy[:, 0, :, :] = box[:, 0, :, :] - box[:, 2, :, :] / 2
+    xyxy[:, 1, :, :] = box[:, 1, :, :] - box[:, 3, :, :] / 2
+    xyxy[:, 2, :, :] = box[:, 0, :, :] + box[:, 2, :, :] / 2
+    xyxy[:, 3, :, :] = box[:, 1, :, :] + box[:, 3, :, :] / 2
+    return xyxy
+
+
+def reference_nms_boxes(boxes, scores, nms_thresh):
+    x, y = boxes[:, 0], boxes[:, 1]
+    w, h = boxes[:, 2] - boxes[:, 0], boxes[:, 3] - boxes[:, 1]
+    areas = w * h
+    order = scores.argsort()[::-1]
+    keep = []
+    while order.size > 0:
+        i = order[0]
+        keep.append(i)
+        xx1 = np.maximum(x[i], x[order[1:]])
+        yy1 = np.maximum(y[i], y[order[1:]])
+        xx2 = np.minimum(x[i] + w[i], x[order[1:]] + w[order[1:]])
+        yy2 = np.minimum(y[i] + h[i], y[order[1:]] + h[order[1:]])
+        inter = (np.maximum(0.0, xx2 - xx1 + 1e-5) * np.maximum(0.0, yy2 - yy1 + 1e-5))
+        ovr = inter / (areas[i] + areas[order[1:]] - inter)
+        order = order[1:][np.where(ovr <= nms_thresh)[0]]
+    return np.array(keep)
+
+
+def reference_post_process_v5(outputs, anchors, img_size, conf_thres, nms_thresh):
+    boxes, scores, classes_conf = [], [], []
+    for idx, data in enumerate(outputs):
+        data = data.reshape([len(anchors[idx]), -1] + list(data.shape[-2:]))
+        boxes.append(reference_box_process(data[:, :4, :, :], anchors[idx], img_size))
+        scores.append(data[:, 4:5, :, :])
+        classes_conf.append(data[:, 5:, :, :])
+
+    def flatten(arr):
+        return arr.transpose(0, 2, 3, 1).reshape(-1, arr.shape[1])
+
+    boxes = np.concatenate([flatten(v) for v in boxes])
+    classes_conf = np.concatenate([flatten(v) for v in classes_conf])
+    scores = np.concatenate([flatten(v) for v in scores])
+
+    class_max = np.max(classes_conf, axis=-1)
+    classes = np.argmax(classes_conf, axis=-1)
+    pos = np.where(class_max * scores.reshape(-1) >= conf_thres)
+    boxes, classes, scores = boxes[pos], classes[pos], (class_max * scores.reshape(-1))[pos]
+
+    out_boxes, out_classes, out_scores = [], [], []
+    for cls in set(classes):
+        idx = np.where(classes == cls)
+        keep = reference_nms_boxes(boxes[idx], scores[idx], nms_thresh)
+        if len(keep):
+            out_boxes.append(boxes[idx][keep])
+            out_classes.append(classes[idx][keep])
+            out_scores.append(scores[idx][keep])
+    if not out_boxes:
+        return None, None, None
+    return (np.concatenate(out_boxes), np.concatenate(out_classes),
+            np.concatenate(out_scores))
+
+
+def normalize(rows):
+    """把两组框排成可比顺序：按 (类别, x1, y1) 排。"""
+    order = np.lexsort((rows[:, 2], rows[:, 1], rows[:, 0]))
+    return rows[order]
+
+
+# ------------------------------------------------------------- 构造合成头 ----
+
+ANCHORS = [[[10.0, 13.0], [16.0, 30.0], [33.0, 23.0]],
+           [[30.0, 61.0], [62.0, 45.0], [59.0, 119.0]],
+           [[116.0, 90.0], [156.0, 198.0], [373.0, 326.0]]]
+
+
+def make_synthetic_heads(n_classes=10, conf_value=0.9):
+    """按给定 anchor 尺寸在三个尺度上各放一个"目标"，返回 (1,C,H,W) 概率头。"""
+    heads = []
+    for level, (grid, anchor_idx) in enumerate([(80, 0), (40, 1), (20, 2)]):
+        channels = 3 * (5 + n_classes)
+        head = np.zeros((1, channels, grid, grid), dtype=np.float32)
+        data = head.reshape(3, 5 + n_classes, grid, grid)
+        row, col = grid // 2, grid // 3 + level
+        data[anchor_idx, 0, row, col] = 0.6      # tx
+        data[anchor_idx, 1, row, col] = 0.4      # ty
+        data[anchor_idx, 2, row, col] = 0.3      # tw
+        data[anchor_idx, 3, row, col] = 0.5      # th
+        data[anchor_idx, 4, row, col] = conf_value
+        data[anchor_idx, 5 + (level % n_classes), row, col] = 0.95
+        # 一堆"有点分数但过不了阈值"的噪声锚点，检验先过滤后解码不漏不误
+        data[anchor_idx, 4, 0, :] = 0.30
+        data[anchor_idx, 5 + (level % n_classes), 0, :] = 0.4
+        heads.append(head)
+    return heads
+
+
+def test_decode_matches_reference():
+    detector = make_detector(ANCHORS)
+    heads = make_synthetic_heads()
+    boxes, classes, scores = detector._post_process_v5(heads)
+    ref_boxes, ref_classes, ref_scores = reference_post_process_v5(
+        heads, ANCHORS, (640, 640), detector.conf_thres, detector.nms_thres)
+
+    check("dec/参考实现都检出了目标", boxes is not None and ref_boxes is not None,
+          "prod=%s ref=%s" % (0 if boxes is None else len(boxes),
+                              0 if ref_boxes is None else len(ref_boxes)))
+    if boxes is None or ref_boxes is None:
+        return
+    check("dec/检出数量一致", len(boxes) == len(ref_boxes),
+          "prod=%d ref=%d" % (len(boxes), len(ref_boxes)))
+    if len(boxes) != len(ref_boxes):
+        return
+
+    prod = normalize(np.hstack([classes[:, None], boxes, scores[:, None]]))
+    ref = normalize(np.hstack([ref_classes[:, None], ref_boxes, ref_scores[:, None]]))
+    check("dec/框与类别逐行一致", np.allclose(prod, ref, atol=1e-3),
+          "\n  prod=%s\n  ref =%s" % (prod.tolist(), ref.tolist()))
+
+
+def test_nms_suppresses_overlap():
+    detector = make_detector(ANCHORS, nms_thres=0.45)
+    same = np.array([[0.0, 0.0, 100.0, 100.0], [2.0, 2.0, 102.0, 102.0]])
+    keep = detector._nms_boxes(same, np.array([0.9, 0.8], dtype=np.float32))
+    check("NMS/重叠框被抑制", len(keep) == 1, "keep=%s" % (keep.tolist(),))
+
+    apart = np.array([[0.0, 0.0, 100.0, 100.0], [300.0, 300.0, 400.0, 400.0]])
+    keep = detector._nms_boxes(apart, np.array([0.9, 0.8], dtype=np.float32))
+    check("NMS/不相交框都保留", len(keep) == 2, "keep=%s" % (keep.tolist(),))
+
+    touching = np.array([[0.0, 0.0, 100.0, 100.0], [99.0, 0.0, 199.0, 100.0]])
+    keep = detector._nms_boxes(touching, np.array([0.9, 0.8], dtype=np.float32))
+    check("NMS/接近但 IoU 低于阈值都保留", len(keep) == 2, "keep=%s" % (keep.tolist(),))
+
+
+def test_letterbox_round_trip():
+    box = LetterBox((640, 640))
+    source = np.zeros((720, 1280, 3), dtype=np.uint8)
+    padded = box.apply(source)
+    check("letterbox/输出尺寸正确", padded.shape[:2] == (640, 640),
+          "shape=%s" % (padded.shape,))
+    check("letterbox/缩放比与填充正确",
+          abs(box.ratio - 0.5) < 1e-6 and abs(box.dw) < 1e-6 and abs(box.dh - 140) < 1e-6,
+          "ratio=%s dw=%s dh=%s" % (box.ratio, box.dw, box.dh))
+
+    # 源图 (100,50)-(300,250) 在比 0.5、dh=140 下 -> (50,165)-(150,265)
+    mapped = np.array([[50.0, 165.0, 150.0, 265.0]], dtype=np.float32)
+    back = box.to_source(mapped)
+    check("letterbox/逆映射闭环", np.allclose(back, [[100.0, 50.0, 300.0, 250.0]], atol=1e-3),
+          "back=%s" % (back.tolist(),))
+
+
+def test_missing_anchors_is_loud():
+    detector = make_detector(None)
+    try:
+        detector._post_process_v5(make_synthetic_heads())
+    except ValueError as exc:
+        check("v5/缺 anchors 时明确报错", "anchors" in str(exc), str(exc))
+    else:
+        check("v5/缺 anchors 时明确报错", False, "没有报错，静默返回了")
+
+
+def test_label_parsing():
+    """标签文件的三种写法都要认，且带空格的类名不能被截断。"""
+    # 板上 /tmp 只读，临时文件放到本目录下
+    workdir = tempfile.mkdtemp(prefix="sam24_labels_", dir=os.path.dirname(
+        os.path.abspath(__file__)))
+    try:
+        three = os.path.join(workdir, "three.txt")
+        with open(three, "w") as fh:
+            fh.write("0 1 person\n1 46 wine glass\n2 88 teddy bear\n")
+        names = load_labels(three)
+        id_map = load_id_map(three)
+        check("标签/三列格式名字不被截断", names == ["person", "wine glass", "teddy bear"],
+              "names=%s" % (names,))
+        check("标签/三列格式抽出映射表", id_map == [1, 46, 88], "id_map=%s" % (id_map,))
+
+        plain = os.path.join(workdir, "plain.txt")
+        with open(plain, "w") as fh:
+            fh.write("# 注释行\nperson\nzebra shark\n")
+        check("标签/单列格式只有名字",
+              load_labels(plain) == ["person", "zebra shark"],
+              "names=%s" % (load_labels(plain),))
+        check("标签/单列格式不做映射", load_id_map(plain) is None)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def test_runtime_label_table():
+    """生产路径（``load_id_map``）读本包标签表，结果必须与第一层的数据断言一致。"""
+    id_map = load_id_map(LABELS_PATH)
+    labels = load_labels(LABELS_PATH)
+    check("运行时/标签表解析出 80 类映射", id_map is not None and len(id_map) == 80,
+          "len=%s" % (None if id_map is None else len(id_map),))
+    if id_map is None or len(id_map) != 80:
+        return
+    check("运行时/西兰花经解析后对外 id 仍是 56", id_map[50] == 56 and labels[50] == "broccoli",
+          "id_map[50]=%s name=%s" % (id_map[50], labels[50]))
+
+
+def main():
+    print("---- 第一层：契约（纯标准库）----")
+    test_label_table_contract()
+    test_roi_mapping_matches_original()
+
+    if RUNTIME_SKIP is None:
+        print("")
+        print("---- 第二层：解码 / NMS / letterbox（numpy + cv2）----")
+        test_decode_matches_reference()
+        test_nms_suppresses_overlap()
+        test_letterbox_round_trip()
+        test_missing_anchors_is_loud()
+        test_label_parsing()
+        test_runtime_label_table()
+        skipped = False
+    else:
+        skipped = True
+        print("")
+        print("[SKIP] 第二层（解码/NMS/letterbox）需要 numpy + cv2，本机没有：%s"
+              % RUNTIME_SKIP)
+        print("       板上跑法：run python3 test/test_rknn_yolo_postprocess.py")
+
+    print("")
+    if FAILURES:
+        print("FAILED %d: %s" % (len(FAILURES), ", ".join(FAILURES)))
+        return 1
+    print("ALL PASS" + ("（第二层已跳过）" if skipped else ""))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+

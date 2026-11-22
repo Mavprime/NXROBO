@@ -1,0 +1,55 @@
+-rw-rw-r-- 1 spark spark 224 11月 22 20:15 /home/spark/transform_3d.dat
+-rw-rw-r-- 1 spark spark 224 11月 22 20:15 /home/spark/transform_3d.dat
+-rw-rw-r-- 1 spark spark 224 11月 21 16:01 /home/spark/transform_3d.dat.bak-20261121-1601
+-rw-rw-r-- 1 spark spark 224 11月 21 16:01 /home/spark/transform_3d.dat.bak-20261121-1601
+-rw-rw-r-- 1 spark spark 224 11月 21 16:01 /home/spark/transform_3d.dat.bak-20261121-1602
+-rw-rw-r-- 1 spark spark 224 11月 21 16:01 /home/spark/transform_3d.dat.bak-20261121-1602
+-rw-rw-r-- 1 spark spark 224 11月 22 15:38 /home/spark/transform_3d.dat.bak-20261122-1538
+-rw-rw-r-- 1 spark spark 224 11月 22 15:38 /home/spark/transform_3d.dat.bak-20261122-1538
+-rw-rw-r-- 1 spark spark 224 11月 20 21:57 /home/spark/transform_3d.dat.old
+-rw-rw-r-- 1 spark spark 224 11月 20 21:57 /home/spark/transform_3d.dat.old
+-rw-rw-r-- 1 spark spark 224 11月 21 16:32 /home/spark/transform_3d.good.dat
+-rw-rw-r-- 1 spark spark 224 11月 21 16:32 /home/spark/transform_3d.good.dat
+-rw-rw-r-- 1 spark spark 459 11月 22 15:38 /home/spark/transform_3d.meta.json
+-rw-rw-r-- 1 spark spark 459 11月 22 15:38 /home/spark/transform_3d.meta.json
+-rw-rw-r-- 1 spark spark 387 7月   1  2025 /home/spark/transform_mat.dat
+---META---
+{
+  "check": {
+    "pose": [
+      270.0,
+      0.0,
+      30.0
+    ],
+    "uv": [
+      338.14,
+      294.96
+    ]
+  },
+  "created": "2026-11-22T15:38:34",
+  "file_md5": "5067d5ab452373325795359bf29b49d6",
+  "in_sample_max_px": 0.4,
+  "in_sample_mean_px": 0.2,
+  "intrinsics": [
+    605.6860961914062,
+    605.8469848632812,
+    315.03875732421875,
+    249.8477020263672
+  ],
+  "loo_max_px": 0.74,
+  "loo_mean_px": 0.47,
+  "poses": 11,
+  "px_per_mm": 1.044
+}
+---FIND-BACKUPS---
+2026-11-22 15:51        224 /home/spark/codes/transform_3d.dat
+2026-11-22 00:24        224 /home/spark/codes/config/transform_3d.dat
+2026-11-22 20:15        224 /home/spark/transform_3d.dat
+2026-11-20 21:57        224 /home/spark/transform_3d.dat.old
+2026-11-21 16:01        224 /home/spark/transform_3d.dat.bak-20261121-1601
+2026-11-21 16:01        224 /home/spark/transform_3d.dat.bak-20261121-1602
+2026-11-21 20:29        224 /home/spark/auto/codes/transform_3d.dat
+2026-11-22 15:38        224 /home/spark/transform_3d.dat.bak-20261122-1538
+2026-11-21 16:32        224 /home/spark/transform_3d.good.dat
+2026-11-22 15:38        459 /home/spark/transform_3d.meta.json
+2026-11-22 00:24        224 /home/spark/simulation/config/transform_3d.dat

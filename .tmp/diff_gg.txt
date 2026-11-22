@@ -1,0 +1,85 @@
+warning: in the working copy of '.tmp\bundle\auto\codes\grasp_generic.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'auto\codes\grasp_generic.py', LF will be replaced by CRLF the next time Git touches it
+diff --git "a/.tmp\\bundle\\auto\\codes\\grasp_generic.py" "b/auto\\codes\\grasp_generic.py"
+index 4fc395a..a08a762 100644
+--- "a/.tmp\\bundle\\auto\\codes\\grasp_generic.py"
++++ "b/auto\\codes\\grasp_generic.py"
+@@ -94,7 +94,7 @@ from runtask import ArmAction, CamAction
+ # ``_grasp_heights``      -> match_logic.grasp_heights
+ # ``reach_state``         -> match_logic.grasp_reach_state (understands "far")
+ # ``target_distance``     -> match_logic.approach_target_distance
+-CAKE_CUP_OFFSET_X = 125.0            # suction-cup forward offset for a raised cake
++CAKE_CUP_OFFSET_X = match_logic.CAKE_CUP_OFFSET_X  # single source of truth (125 mm)
+ 
+ TRANSIT_X = 140.0                    # intermediate X for the safe lateral transit
+ TRANSIT_Y_FACTOR = 0.4               # intermediate Y = plan.y * TRANSIT_Y_FACTOR
+@@ -137,7 +137,7 @@ STATE_FILE = os.path.expanduser("~/logs/cake_smooth_state.json")
+ #: Confidence floor for ordinary (non-cake) detections used by the field test.
+ #: The detector node already drops non-cake boxes below 0.25; raising this to
+ #: ~0.35 (match_logic.CONF_THRESHOLD) filters the remaining one-frame glare.
+-DEFAULT_DETECT_CONF = 0.04
++DEFAULT_DETECT_CONF = match_logic.CONF_THRESHOLD
+ #: Anti-glare gate for the raw Cake class (id 2).  Same default as
+ #: match_logic.CAKE_CONF_THRESHOLD; override with ``--cake-conf``.
+ DEFAULT_CAKE_CONF = match_logic.CAKE_CONF_THRESHOLD
+@@ -268,43 +268,30 @@ def bumper(side="front"):
+         log("[WARN] no base sensor: %s" % exc)
+         return False
+     if side == "front":
+-        return bool(msg.ir_bumper_front or msg.ir_bumper_front_left
+-                    or msg.ir_bumper_front_right)
++        # Hardware note: ir_bumper_front is permanently stuck True on this
++        # chassis, so only left/right front IR sensors are checked.
++        return bool(msg.ir_bumper_front_left or msg.ir_bumper_front_right)
+     return bool(getattr(msg, "ir_bumper_back_left", False)
+                 or getattr(msg, "ir_bumper_back_right", False))
+ 
+ 
+ def compute_target_coords(cam, u, v, is_cake, scale, cake_offset=CAKE_CUP_OFFSET_X):
+-    """Compute the 3D arm workspace coordinates (x, y) from an image pixel."""
++    """Compute arm workspace (x, y) deterministically without unreliable depth.
++
++    RealSense depth is non-linearly biased under 0.5 m (SI-33), so near-field
++    targeting uses the calibrated projective/affine models directly:
++      * tier-2 Cake -> dedicated affine ``pixel_to_cake_xy`` (+125 mm offset);
++      * floor cube  -> closed-form DLT inversion at z=-100 mm (+20 mm offset).
++    """
+     xy = None
+     z_est = None
+-    try:
+-        depth = grab_depth()
+-        d = depth_at(depth, u, v)
+-        if d is not None:
+-            point = solve_arm_point(cam.transform3d, unproject(u, v, d), scale)
+-            cand_z = float(point[2])
+-            # For an elevated cake, a depth reading that hit the floor/background
+-            # (z < -30 mm) is rejected so the dedicated cake affine calibration
+-            # is used instead.
+-            if is_cake and cand_z < -30.0:
+-                log("[TARGET] Cake depth reading hit floor/background (z=%.1f) "
+-                    "-> using cake affine" % cand_z)
+-            else:
+-                xy = (float(point[0]), float(point[1]))
+-                z_est = cand_z
+-    except Exception as exc:
+-        log("[WARN] depth reconstruction exception: %s" % exc)
+-
+-    if xy is None:
+-        if is_cake:
+-            xy = match_logic.pixel_to_cake_xy(cam.transform3d, u, v,
+-                                              cup_offset_x=cake_offset)
+-        else:
+-            dlt_xy = match_logic.pixel_to_xy_at_z(cam.transform3d, u, v, -100.0)
+-            if dlt_xy is not None:
+-                xy = (float(dlt_xy[0]) + 20.0, float(dlt_xy[1]))
+-
++    if is_cake:
++        xy = match_logic.pixel_to_cake_xy(cam.transform3d, u, v,
++                                          cup_offset_x=cake_offset)
++    else:
++        dlt_xy = match_logic.pixel_to_xy_at_z(cam.transform3d, u, v, -100.0)
++        if dlt_xy is not None:
++            xy = (float(dlt_xy[0]) + 20.0, float(dlt_xy[1]))
+     return xy, z_est
+ 
+ 

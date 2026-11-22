@@ -45,3 +45,6 @@ desktop.ini
 
 # Robot state
 .arm_last_pose
+
+# Operator view snapshots downloaded by run_grasp_test.bat (runtime artifacts)
+snapshots/

@@ -41,7 +41,7 @@ import numpy as np
 import rospy
 from cv_bridge import CvBridge
 
-from calib_pad import pad_pixel, grab
+from pad_detect import pad_pixel, grab
 from runtask import ArmAction, CAM_FX, CAM_FY, CAM_CX, CAM_CY
 
 OUT_PATH = os.path.expanduser("~/transform_3d.dat")

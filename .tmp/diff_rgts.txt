@@ -1,0 +1,15 @@
+warning: in the working copy of '.tmp\bundle\auto\codes\run_grasp_test.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'auto\codes\run_grasp_test.sh', LF will be replaced by CRLF the next time Git touches it
+diff --git "a/.tmp\\bundle\\auto\\codes\\run_grasp_test.sh" "b/auto\\codes\\run_grasp_test.sh"
+index 610d8dc..8c99a9f 100644
+--- "a/.tmp\\bundle\\auto\\codes\\run_grasp_test.sh"
++++ "b/auto\\codes\\run_grasp_test.sh"
+@@ -112,7 +112,7 @@ if ! node_up /detector_node; then
+     # a restart.  Clear them so detect_ros.py file defaults are used.
+     rosparam delete /detector_node/cake_conf 2>/dev/null
+     rosparam delete /detector_node/cake_site_conf 2>/dev/null
+-    setsid nohup python3 -u "$DETECT_NODE" _augment:=true _conf:=0.25 > ~/logs/detect.log 2>&1 < /dev/null &
++    setsid nohup python3 -u "$DETECT_NODE" _augment:=false _conf:=0.25 > ~/logs/detect.log 2>&1 < /dev/null &
+     
+     echo -e "      Waiting for neural network weights initialization..."
+     for i in $(seq 1 60); do

@@ -1,0 +1,12 @@
+FRAMES: 9
+id=3  score=0.917 px=(491,40) size=89x72 depth=0.646
+id=30 score=0.916 px=(488,108) size=100x55 depth=0.671
+id=4  score=0.792 px=(347,48) size=114x77 depth=0.651
+id=3  score=0.774 px=(486,107) size=95x57 depth=0.667
+id=40 score=0.417 px=(221,107) size=138x67 depth=0.679
+id=40 score=0.345 px=(81,427) size=162x102 depth=0.592
+id=40 score=0.281 px=(346,106) size=127x63 depth=0.668
+id=3  score=0.907 px=(492,39) size=85x70 depth=0.646
+id=20 score=0.724 px=(218,109) size=89x62 depth=0.684
+id=20 score=0.627 px=(345,110) size=95x64 depth=0.673
+PROBE_DONE

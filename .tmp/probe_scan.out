@@ -1,0 +1,12 @@
+[INFO] [1795348660.112953]: >> [VISION] items_config.yaml loaded, item ids: [3, 1, 2, 4]
+[INFO] [1795348660.120806]: >> [CALIB] matrix from /home/spark/transform_3d.dat: 1.05 px/mm at the workspace, round-trip 0.0 mm
+[INFO] [1795348660.123461]: >> [CALIB] fitted 2026-11-22T15:38:34 from 11 pose(s), leave-one-out max 0.7 px / mean 0.5 px
+[INFO] [1795348665.134815]: >> [VISION] 6 cube(s) from 4 frame(s): [[3, [492, 39, 0]], [3, [487, 107, 0]], [4, [347, 48, 0]], [2, [220, 108, 0]], [2, [345, 107, 0]], [4, [76, 424, 0]]]
+RAW_DETECTIONS: [[3, [492, 39, 0]], [3, [487, 107, 0]], [4, [347, 48, 0]], [2, [220, 108, 0]], [2, [345, 107, 0]], [4, [76, 424, 0]]]
+DET id=3 px=(492,39) gate_pass=False depth=0.647 z_est=-119.6 xy=(484.3, -178.0) reach=(False, 515.9270311721485)
+DET id=3 px=(487,107) gate_pass=False depth=0.67 z_est=-162.3 xy=(428.7, -176.9) reach=(False, 463.8088380220966)
+DET id=4 px=(347,48) gate_pass=False depth=0.653 z_est=-114.6 xy=(479.1, -28.3) reach=(False, 479.91948416170476)
+DET id=2 px=(220,108) gate_pass=False depth=0.679 z_est=-145.0 xy=(432.7, 109.9) reach=(False, 446.4100110930652)
+DET id=2 px=(345,107) gate_pass=False depth=0.668 z_est=-148.0 xy=(427.6, -24.8) reach=(False, 428.28260559663227)
+DET id=4 px=(76,424) gate_pass=False depth=0.598 z_est=-185.3 xy=(92.6, 250.6) reach=(False, 267.11502079313937)
+PROBE_DONE
