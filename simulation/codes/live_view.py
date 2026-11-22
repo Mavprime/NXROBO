@@ -61,8 +61,13 @@ HTML_TEMPLATE = r"""<!doctype html>
 <script>
 const SC = __SCENARIO__;
 const cv = document.getElementById('c'), cx = cv.getContext('2d');
-const W = cv.width, H = cv.height, S = W / 3.35, CX = W/2, CY = H/2;
-const X = x => CX + x*S, Y = y => CY - y*S;
+const W = cv.width, H = cv.height;
+const AR = SC.arena || {size:[3,3], origin:[0,0]};
+const AX0 = AR.origin[0], AY0 = AR.origin[1], AW = AR.size[0], AH = AR.size[1];
+const PAD = 0.18;
+const S = Math.min(W,H) / (Math.max(AW,AH) + 2*PAD);
+const X = x => (x - AX0 + PAD) * S;
+const Y = y => H - (y - AY0 + PAD) * S;
 const COL = {doll:'#8c5a33', clock:'#d9d9d9', banana:'#f2d91a', cake:'#e64c66'};
 
 function rect(x0,y0,x1,y1,fill,stroke,lw){
@@ -75,23 +80,31 @@ function dot(x,y,r,fill,stroke){cx.beginPath();cx.arc(X(x),Y(y),r,0,7);cx.fillSt
 
 function drawStatic(){
   cx.clearRect(0,0,W,H);
-  rect(-1.5,-1.5,1.5,1.5,'#11161c','#6f7c8a',2);
+  rect(AX0,AY0,AX0+AW,AY0+AH,'#11161c','#6f7c8a',2);
   for(const [z,info] of Object.entries(SC.zones)){
     const tc = info.transport_center, cc = info.collection_center;
     const fill = (z==='A'||z==='D') ? '#1d1b10' : '#101a13';
     rect(tc[0]-0.5,tc[1]-0.5,tc[0]+0.5,tc[1]+0.5,fill,'#232c36',1);
     rect(cc[0]-0.225,cc[1]-0.225,cc[0]+0.225,cc[1]+0.225,null,'#c9363f',1.6);
     cx.fillStyle='#586878'; cx.font='11px monospace'; cx.textAlign='center';
-    cx.fillText('Zone '+z, X(cc[0]), Y(cc[1])+18);
+    cx.fillText('Zone '+z, X(tc[0]), Y(tc[1])+4);
   }
-  rect(-1.5,-0.2,-1.17,0.2,'#2a3038','#4a5563',1);
-  cx.fillStyle='#6b7887'; cx.font='10px monospace'; cx.textAlign='center';
-  cx.fillText('table', X(-1.335), Y(0.30));
+  const tb = SC.table;
+  if(tb){
+    const c = tb.center, s = tb.size;
+    rect(c[0]-s[0]/2, c[1]-s[1]/2, c[0]+s[0]/2, c[1]+s[1]/2,
+         '#2a3038','#4a5563',1);
+    cx.fillStyle='#6b7887'; cx.font='10px monospace'; cx.textAlign='center';
+    cx.fillText('table', X(c[0]), Y(c[1]+s[1]/2+0.10));
+  }
+  const bd = SC.board || {center:[0.165,1.5]};
   (SC.board_left_to_right||[]).forEach((ty,i)=>{
-    const y=(i-1)*0.12;
-    rect(-1.385,y-0.05,-1.285,y+0.05,COL[ty]||'#777',null,0);
+    const y = (bd.cards_y && bd.cards_y[i] !== undefined) ? bd.cards_y[i]
+              : bd.center[1] + (i-1)*0.12;
+    rect(bd.center[0]-0.05, y-0.05, bd.center[0]+0.05, y+0.05,
+         COL[ty]||'#777', null, 0);
   });
-  cx.fillStyle='#6b7887'; cx.fillText('board L→R', X(-1.335), Y(-0.32));
+  cx.fillStyle='#6b7887'; cx.fillText('board L→R', X(bd.center[0]), Y(bd.center[1]-0.32));
   for(const [name,p] of Object.entries(SC.points)){
     if(name.endsWith('_approach')){ cx.beginPath(); cx.arc(X(p[0]),Y(p[1]),3,0,7);
       cx.strokeStyle='#3e6f9e'; cx.lineWidth=1; cx.stroke(); continue; }

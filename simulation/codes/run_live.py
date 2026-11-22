@@ -36,7 +36,8 @@ def main() -> int:
     ap.add_argument("--start-delay", type=float, default=2.0,
                     help="seconds to wait after starting the viewer before the mission")
     ap.add_argument("--mission", default=os.path.join(here, "..", "config", "mission_demo.yaml"))
-    ap.add_argument("--scenario", default=os.path.join(here, "scenario.json"))
+    ap.add_argument("--scenario", default=os.path.join(here, "..", "config", "arena_map.yaml"),
+                    help="arena_map.yaml (canonical) or a generated scenario.json")
     ap.add_argument("--robot", default=os.path.join(here, "..", "config", "robot.yaml"),
                     help="measured chassis/arm parameters")
     ap.add_argument("--lin-speed", type=float, default=None, help="override m/s")
@@ -49,8 +50,14 @@ def main() -> int:
     ap.add_argument("--report", default=None, help="write the run report as JSON")
     args = ap.parse_args()
 
-    with open(args.scenario) as f:
-        scenario = json.load(f)
+    if args.scenario.endswith((".yaml", ".yml")):
+        import yaml
+
+        with open(args.scenario) as f:
+            scenario = yaml.safe_load(f)
+    else:
+        with open(args.scenario) as f:
+            scenario = json.load(f)
 
     params = RobotParams.from_yaml(args.robot) if args.robot else RobotParams()
     if args.lin_speed is not None:

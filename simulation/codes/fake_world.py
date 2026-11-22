@@ -27,8 +27,8 @@ from mission_logic import (
     WorldModel,
     canonical_class,
 )
+from planner import plan_path
 
-WALL = 1.5
 ROBOT_RADIUS = 0.12
 FOV = math.radians(90.0)
 CAM_RANGE = 1.60
@@ -135,7 +135,20 @@ class FakeWorld:
 
         self.points = {k: (float(v[0]), float(v[1])) for k, v in scenario["points"].items()}
         self.zones = scenario["zones"]
-        self.table = (-1.50, -0.20, -1.17, 0.20)   # sorting table AABB on the west wall
+
+        arena = scenario.get("arena") or {}
+        self.min_x, self.min_y = (float(v) for v in arena.get("origin", [0.0, 0.0]))
+        size = arena.get("size", [3.0, 3.0])
+        self.max_x = self.min_x + float(size[0])
+        self.max_y = self.min_y + float(size[1])
+
+        table = scenario.get("table")
+        if table:
+            cx, cy = table["center"]
+            sx, sy = table["size"]
+            self.table = (cx - sx / 2, cy - sy / 2, cx + sx / 2, cy + sy / 2)
+        else:
+            self.table = None
 
         self.cubes = [
             Cube(b["name"], b["type"], float(b["x"]), float(b["y"]), int(b.get("layer", 1)))
@@ -182,16 +195,17 @@ class FakeWorld:
         nx = self.x + self.v * math.cos(self.yaw) * dt
         ny = self.y + self.v * math.sin(self.yaw) * dt
         nyaw = wrap(self.yaw + self.w * dt)
-        nx = clamp(nx, -WALL + ROBOT_RADIUS, WALL - ROBOT_RADIUS)
-        ny = clamp(ny, -WALL + ROBOT_RADIUS, WALL - ROBOT_RADIUS)
+        nx = clamp(nx, self.min_x + ROBOT_RADIUS, self.max_x - ROBOT_RADIUS)
+        ny = clamp(ny, self.min_y + ROBOT_RADIUS, self.max_y - ROBOT_RADIUS)
 
-        if circle_aabb(nx, ny, ROBOT_RADIUS, self.table):
-            self.v = 0.0
-            self.w = 0.0
-            self.v_cmd = 0.0
-            self.w_cmd = 0.0
-            self.collisions += 1
-            return
+        for box in self.nav_obstacles():
+            if circle_aabb(nx, ny, ROBOT_RADIUS, box):
+                self.v = 0.0
+                self.w = 0.0
+                self.v_cmd = 0.0
+                self.w_cmd = 0.0
+                self.collisions += 1
+                return
 
         self.x, self.y, self.yaw = nx, ny, nyaw
         if math.hypot(self.x - self.trail[-1][0], self.y - self.trail[-1][1]) > 0.025:
@@ -202,12 +216,25 @@ class FakeWorld:
 
     # -- sensing ------------------------------------------------------------
 
+    def nav_obstacles(self) -> list[tuple[float, float, float, float]]:
+        """Physical obstacles for navigation: table + field cubes (not carried)."""
+        boxes = []
+        if self.table is not None:
+            boxes.append(self.table)
+        for cube in self.cubes:
+            if cube.status == "field":
+                boxes.append((cube.x - 0.05, cube.y - 0.05,
+                              cube.x + 0.05, cube.y + 0.05))
+        return boxes
+
     def _obstacles(self) -> list[tuple[float, float, float, float]]:
-        boxes = [self.table,
-                 (-WALL, -WALL - 0.05, WALL, -WALL),
-                 (-WALL, WALL, WALL, WALL + 0.05),
-                 (-WALL - 0.05, -WALL, -WALL, WALL),
-                 (WALL, -WALL, WALL + 0.05, WALL)]
+        boxes = self.nav_obstacles()
+        boxes += [
+            (self.min_x, self.min_y - 0.05, self.max_x, self.min_y),
+            (self.min_x, self.max_y, self.max_x, self.max_y + 0.05),
+            (self.min_x - 0.05, self.min_y, self.min_x, self.max_y),
+            (self.max_x, self.min_y, self.max_x + 0.05, self.max_y),
+        ]
         for cube in self.cubes:
             if cube.status == "field" and cube.layer == 1:
                 boxes.append((cube.x - 0.05, cube.y - 0.05, cube.x + 0.05, cube.y + 0.05))
@@ -268,7 +295,7 @@ class FakeWorld:
 
     # -- arm mock -----------------------------------------------------------
 
-    def pick_at_reach(self, cls: str) -> tuple[bool, str]:
+    def pick_at_reach(self, cls: str) -> tuple[bool, str, Optional[tuple[float, float]]]:
         ccls = canonical_class(cls)
         candidates = [
             c for c in self.cubes
@@ -276,19 +303,20 @@ class FakeWorld:
             and math.hypot(c.x - self.x, c.y - self.y) <= self.p.arm_reach_m
         ]
         if not candidates:
-            return False, ""
+            return False, "", None
         cube = min(candidates, key=lambda c: math.hypot(c.x - self.x, c.y - self.y))
+        pose = (cube.x, cube.y)
         cube.status = "carried"
         self.carried = cube
-        return True, cube.cls
+        return True, cube.cls, pose
 
     def place_front(self, level: int = 1) -> bool:
         cube = self.carried
         if cube is None:
             return False
         px, py = self.front_point(0.30)
-        cube.x = clamp(px, -WALL + 0.05, WALL - 0.05)
-        cube.y = clamp(py, -WALL + 0.05, WALL - 0.05)
+        cube.x = clamp(px, self.min_x + 0.05, self.max_x - 0.05)
+        cube.y = clamp(py, self.min_y + 0.05, self.max_y - 0.05)
         cube.layer = max(1, int(level))
         cube.status = "field"
         cube.delivered = True
@@ -397,26 +425,32 @@ class SpatialPlatform:
             if centre is not None:
                 return math.atan2(centre[1] - target[1], centre[0] - target[0])
         if name.startswith("Sorting_"):
-            return math.atan2(-target[1], -target[0])   # face the central bricks
+            cx = (self.world.min_x + self.world.max_x) / 2.0
+            cy = (self.world.min_y + self.world.max_y) / 2.0
+            return math.atan2(cy - target[1], cx - target[0])   # face the central bricks
         if name == "Classification_area":
             return math.pi                            # face the table (west)
         return None
 
     # -- navigation ---------------------------------------------------------
 
-    def goto(self, point: str) -> bool:
-        target = self.world.points.get(point)
-        if target is None:
-            return False
-        tx, ty = target
-        desired_yaw = self._target_yaw(point, target)
-        deadline = self.world.t + 60.0
-
+    def _drive_to(self, tx: float, ty: float, tol: float, deadline: float,
+                  desired_yaw: Optional[float] = None) -> bool:
+        """Drive to one waypoint; optionally rotate to the final heading."""
         while self.world.t < deadline and not self.stop_requested():
             dx, dy = tx - self.world.x, ty - self.world.y
             dist = math.hypot(dx, dy)
-            if dist <= 0.04:
-                break
+            if dist <= tol:
+                if desired_yaw is None:
+                    break
+                error = wrap(desired_yaw - self.world.yaw)
+                if abs(error) <= 0.10:
+                    break
+                self.world.set_cmd(0.0, clamp(1.5 * error,
+                                              -self.world.p.max_angular_rps,
+                                              self.world.p.max_angular_rps))
+                self.world.advance(STEP_DT)
+                continue
             heading_error = wrap(math.atan2(dy, dx) - self.world.yaw)
             if abs(heading_error) > 0.60:
                 v, w = 0.0, clamp(1.5 * heading_error,
@@ -432,7 +466,7 @@ class SpatialPlatform:
 
         self.world.set_cmd(0.0, 0.0)
         if desired_yaw is not None:
-            end = self.world.t + 5.0
+            end = min(deadline, self.world.t + 5.0)
             while self.world.t < end and not self.stop_requested():
                 error = wrap(desired_yaw - self.world.yaw)
                 if abs(error) <= 0.10:
@@ -444,7 +478,38 @@ class SpatialPlatform:
         self.world.stop()
         self.world.advance(self.world.p.settle_s)
 
-        return math.hypot(tx - self.world.x, ty - self.world.y) <= 0.05
+        dist = math.hypot(tx - self.world.x, ty - self.world.y)
+        yaw_ok = (desired_yaw is None
+                  or abs(wrap(desired_yaw - self.world.yaw)) <= 0.15)
+        return dist <= tol + 0.03 and yaw_ok
+
+    def goto(self, point: str) -> bool:
+        target = self.world.points.get(point)
+        if target is None:
+            return False
+        tx, ty = target
+        desired_yaw = self._target_yaw(point, target)
+        deadline = self.world.t + 60.0
+
+        path = plan_path(
+            (self.world.x, self.world.y), (tx, ty),
+            self.world.nav_obstacles(),
+            (self.world.min_x, self.world.min_y,
+             self.world.max_x, self.world.max_y),
+            resolution=0.05, radius=ROBOT_RADIUS + 0.03,
+        )
+        if not path:
+            return False
+
+        for index, (px, py) in enumerate(path[1:], start=1):
+            is_last = index == len(path) - 1
+            if not self._drive_to(
+                    px, py,
+                    tol=0.05 if is_last else 0.06,
+                    deadline=deadline,
+                    desired_yaw=desired_yaw if is_last else None):
+                return False
+        return math.hypot(tx - self.world.x, ty - self.world.y) <= 0.10
 
     # -- perception ---------------------------------------------------------
 
@@ -461,10 +526,10 @@ class SpatialPlatform:
     # -- arm ----------------------------------------------------------------
 
     def pick(self, cls: str) -> PickResult:
-        ok, confirmed = self.world.pick_at_reach(cls)
+        ok, confirmed, pose = self.world.pick_at_reach(cls)
         if ok:
             self._sleep_sim(self.world.p.pick_s)   # aligned with runtask.grasp()
-            return PickResult(True, confirmed_class=confirmed)
+            return PickResult(True, confirmed_class=confirmed, confirmed_pose=pose)
         return PickResult(False, reason="no %s within reach" % cls)
 
     def place(self, level: int) -> PlaceResult:

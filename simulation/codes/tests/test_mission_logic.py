@@ -11,6 +11,8 @@ import os
 import sys
 import unittest
 
+import yaml
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 CODE_DIR = os.path.dirname(HERE)
 sys.path.insert(0, CODE_DIR)
@@ -225,6 +227,27 @@ class GatePickTests(unittest.TestCase):
         self.assertFalse(verdict.passed)
         self.assertEqual(verdict.action, GateAction.RESCAN)
 
+    def test_g1_prefers_target_pose(self):
+        far = det("bear", x=-0.25, y=0.55)
+        near = det("bear", x=0.05, y=0.55)
+        window = [[far, near] for _ in range(5)]
+        verdict = self.gate.pick(
+            window, "bear", STATION_N, self.mem, target_pose=(0.0, 0.55)
+        )
+        self.assertTrue(verdict.passed, verdict.reason)
+        self.assertAlmostEqual(verdict.evidence.x, 0.05)
+        self.assertAlmostEqual(verdict.evidence.y, 0.55)
+
+    def test_g1_target_prefers_across_frames(self):
+        near = det("bear", conf=0.45, x=0.05, y=0.55)
+        far = det("bear", conf=0.95, x=-0.25, y=0.55)
+        window = [[near]] + [[far] for _ in range(4)]
+        verdict = self.gate.pick(
+            window, "bear", STATION_N, self.mem, target_pose=(0.0, 0.55)
+        )
+        self.assertTrue(verdict.passed, verdict.reason)
+        self.assertAlmostEqual(verdict.evidence.x, 0.05)
+
     def test_g2_pose_mismatch_revises_belief(self):
         verdict = self.gate_pick(frames(det("cake", x=0.0, y=0.0)))
         self.assertFalse(verdict.passed)
@@ -324,6 +347,16 @@ class MemoryTests(unittest.TestCase):
         self.mem.mark_placed(zone="A", verified=None)
         self.assertEqual(self.mem.last_placed.status, "delivered_unverified")
 
+    def test_mark_picked_uses_evidence_pose(self):
+        mem = MissionMemory.from_inventory([
+            {"name": "b_near", "type": "doll", "x": 1.35, "y": 1.5},
+            {"name": "b_far", "type": "doll", "x": 1.65, "y": 1.35},
+        ])
+        inst = mem.mark_picked("bear", pose=(1.65, 1.35))
+        self.assertEqual(inst.name, "b_far")
+        self.assertEqual(mem.available("bear"), 1)
+        self.assertEqual(mem.carried.name, "b_far")
+
     def test_confirmed_class_wins(self):
         inst = self.mem.mark_picked("bear", confirmed="clock")
         self.assertEqual(inst.cls, "clock")
@@ -362,7 +395,7 @@ class WorldModelTests(unittest.TestCase):
             sc = json.load(f)
         world = WorldModel.from_scenario(sc)
         self.assertEqual(len(world.bricks), 10)
-        self.assertEqual(world.station_pose("S"), (0.0, -0.38))
+        self.assertEqual(world.station_pose("S"), (1.5, 1.09))
         mem = MissionMemory.from_inventory(world.bricks, world.default_mapping)
         self.assertEqual(mem.available("bear"), 3)
         self.assertEqual(mem.available("cake"), 1)
@@ -531,6 +564,34 @@ class ExecutorTests(unittest.TestCase):
         report = self.run_mission(m, plat)
         self.assertEqual(report.state, "ABORT")
         self.assertIn("precheck", report.reason)
+
+    def test_fetch_adaptive_station_and_zone(self):
+        # One bear at the left-middle cell: the fetch should choose Sorting_W,
+        # pick it, and deliver to zone B from the mapping.
+        with open(os.path.join(CODE_DIR, "..", "config", "arena_map.yaml")) as f:
+            world = WorldModel.from_scenario(yaml.safe_load(f))
+        memory = MissionMemory.from_inventory(
+            [{"name": "bear_x", "type": "doll", "x": 1.355, "y": 1.5}],
+            {"bear": "B", "clock": "C", "banana": "D", "cake": "A"},
+        )
+        plat = FakePlatform(
+            windows=[
+                frames(det("bear", x=1.355, y=1.5)),      # pick gate at Sorting_W
+                frames(det("bear", x=2.775, y=2.775)),    # verify at zone B centre
+            ],
+            goto=[True, True],
+            picks=[PickResult(True, confirmed_class="bear")],
+            places=[PlaceResult(True)],
+        )
+        m = mission(("fetch", {"class": "bear", "count": 1, "level": 1}))
+        report = MissionRunner(m, plat, world, memory=memory).run()
+        self.assertEqual(report.state, "DONE")
+        self.assertEqual(report.records[0].outcome, Outcome.OK)
+        self.assertEqual(plat.goto_calls, ["Sorting_W", "Collection_B_approach"])
+        self.assertEqual(plat.pick_calls, ["bear"])
+        self.assertEqual(plat.place_calls, [1])
+        self.assertEqual(memory.last_placed.status, "delivered")
+        self.assertEqual(report.records[0].details.get("delivered"), 1)
 
     def test_full_demo_mission(self):
         steps = [

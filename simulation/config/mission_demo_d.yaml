@@ -1,0 +1,34 @@
+# Demo mission: D variant. Start in D, drive to the west sorting stand-off, pick
+# the cake, carry it back to D, place and verify.
+#
+# Robot start: D collection square, (0.225, 0.225), yaw +45 deg.
+# Sorting_W is the 3 cm outward-biased stand-off (1.090, 1.500), so the cake is
+# ~0.41 m from the robot; the arm pipeline's approach creep closes the last ~6 cm.
+#
+# Run with the real arm service (or arm_mock_node.py for a dry run):
+#   python3 ~/codes/mission_node.py _mission:=$HOME/codes/config/mission_demo_d.yaml
+
+name: demo_pick_deliver_d
+description: >
+  Start in D, drive to Sorting_W, pick the cake, deliver it to zone D, verify it.
+clock_budget_s: 540
+
+steps:
+  - goto:
+      point: Sorting_W
+      tol: 0.08
+  - pick:
+      class: cake
+      station: W
+      attempts: 3
+
+  - goto:
+      point: Collection_D_approach
+      tol: 0.06
+  - place:
+      zone: D
+      level: 1
+  - verify:
+      class: cake
+      zone: D
+      timeout_s: 3.0

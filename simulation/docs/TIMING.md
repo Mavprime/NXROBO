@@ -37,14 +37,42 @@ bound.
 
 | Step | Simulated time |
 |---|---:|
-| goto Sorting_N | 11.7 s |
+| goto Sorting_N | 11.0 s |
 | pick cake | 4.5 s (4.0 arm + 0.5 scan) |
 | goto Collection_A_approach | 9.6 s |
 | place cake | 3.0 s |
 | verify cake | 0.5 s |
-| **total** | **29.3 s** |
+| **total** | **28.6 s** |
 
 Score 3, zero collisions. This is the number to compare against a physical run.
+
+### Gazebo measurement (Docker, move_base + DWA, synthetic detections/arm mock)
+
+| Step | Time |
+|---|---:|
+| goto Sorting_N | 40.6 s (includes AMCL convergence) |
+| pick | 4.5 s |
+| goto Collection_A_approach | 8.8 s |
+| place | 3.0 s |
+| verify | 0.5 s |
+| **total** | **~57.4 s** |
+
+The second goto matches the simulation closely; the first is dominated by AMCL/costmap
+startup. This is the measurement to beat when tuning `move_base`.
+
+### Robot NUC measurement (same Gazebo sim, isolated master 11312)
+
+| Step | Time |
+|---|---:|
+| goto Sorting_N | 15.4 s |
+| pick | 3.4 s |
+| goto Collection_A_approach | 9.8 s |
+| place | 2.0 s |
+| verify | 0.5 s |
+| **total** | **~31.7 s** |
+
+`DONE`, cake `delivered`. The robot run is much faster than Docker on the first goto
+(AMCL was already converged before the start flag).
 
 ## What is NOT modelled (real runs will be slower)
 
@@ -60,7 +88,7 @@ Score 3, zero collisions. This is the number to compare against a physical run.
    battery voltage effects.**
 5. **Tower stacking.** Only level 1 is modelled.
 
-So treat 29.3 s as the **drive + arm baseline at production speeds**, not a guarantee.
+So treat 28.6 s as the **drive + arm baseline at production speeds**, not a guarantee.
 A real run of the same mission will likely be somewhat longer until the nav stack is
 tuned.
 

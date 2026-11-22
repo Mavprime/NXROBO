@@ -1,0 +1,34 @@
+<launch>
+  <!-- Navigation for the 0..3 m arena map (static map, AMCL, move_base).
+       Deploy with maps/arena_map.{pgm,yaml} in ~/codes/maps/.
+       The map frame origin is the arena SW corner, so map == arena. -->
+
+  <arg name="map" default="$(env HOME)/codes/maps/arena_map.yaml"/>
+  <arg name="init_x" default="0.225"/>
+  <arg name="init_y" default="2.775"/>
+  <arg name="init_a" default="-0.785398"/>
+  <arg name="use_sim_time" default="false"/>
+  <!-- On the robot: the vendor launch (spark_navigation is installed there).
+       In the Docker sim: override with /ws/ros/move_base_arena.launch. -->
+  <arg name="move_base_launch"
+       default="$(find auto_match)/config/move_base_param/move_base.launch.xml"/>
+
+  <param name="/use_sim_time" value="$(arg use_sim_time)"/>
+
+  <node pkg="map_server" type="map_server" name="map_server"
+        args="$(arg map)" output="screen"/>
+
+  <include file="$(find auto_match)/config/amcl.launch.xml">
+    <arg name="initial_pose_x" value="$(arg init_x)"/>
+    <arg name="initial_pose_y" value="$(arg init_y)"/>
+    <arg name="initial_pose_a" value="$(arg init_a)"/>
+    <arg name="base_frame_id" value="base_footprint"/>
+    <arg name="scan_topic" value="scan"/>
+  </include>
+
+  <!-- Let the move_base launch use its own defaults: map / odom / base_footprint.
+       (The vendor launch declares odom_frame_id/base_frame_id/global_frame_id, while
+       the sim launch uses map_frame/odom_frame/base_frame; passing either set breaks
+       the other.) -->
+  <include file="$(arg move_base_launch)"/>
+</launch>

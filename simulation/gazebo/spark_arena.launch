@@ -1,0 +1,33 @@
+<launch>
+  <!-- Spark chassis in the 3x3 arena (Gazebo Classic 11).
+       Run inside the Noetic container (see docker/run_gazebo.sh), which mounts
+       simulation/ at /ws. Start navigation separately with ros/nav_arena.launch. -->
+
+  <arg name="world" default="/ws/gazebo/arena.world"/>
+  <arg name="model" default="/ws/assets/spark1_description/urdf/spark1_description_nav.urdf"/>
+  <arg name="x" default="0.225"/>
+  <arg name="y" default="2.775"/>
+  <arg name="z" default="0.05"/>
+  <arg name="yaw" default="-0.785398"/>
+  <arg name="gui" default="false"/>
+  <arg name="paused" default="false"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(arg world)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="paused" value="$(arg paused)"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="verbose" value="false"/>
+  </include>
+
+  <param name="robot_description"
+         command="$(find xacro)/xacro $(arg model)"/>
+
+  <node pkg="robot_state_publisher" type="robot_state_publisher"
+        name="robot_state_publisher" output="screen"/>
+
+  <node pkg="gazebo_ros" type="spawn_model" name="spawn_spark"
+        args="-urdf -param robot_description -model spark
+              -x $(arg x) -y $(arg y) -z $(arg z) -Y $(arg yaw)"
+        output="screen"/>
+</launch>

@@ -1,0 +1,9 @@
+# Loaded last by move_base.launch.xml (custom_param_file) on top of the vendor
+# auto_match params; the vendor files are left untouched.
+#
+# Tighter arrival than the vendor default xy_goal_tolerance: 0.05 so the chassis
+# stays inside the 3 cm sorting stand-off margin. Yaw is left at 0.05 because
+# AMCL heading noise is ~±6 deg; tightening it only causes end-of-goal spinning.
+DWAPlannerROS:
+  xy_goal_tolerance: 0.03
+  yaw_goal_tolerance: 0.05

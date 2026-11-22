@@ -1,28 +1,31 @@
 #!/usr/bin/env python3
-"""Generate arena.world (Gazebo 11 / SDF 1.6) and scenario.json for the Spark auto-task field.
+"""Generate arena.world (Gazebo 11 / SDF 1.6) and scenario.json from arena_map.yaml.
 
-Frame: origin = arena centre, +x = east (right in the layout figure), +y = north (top).
-Zones: A = top-left, B = top-right, C = bottom-right, D = bottom-left.
-The robot starts in the A collection zone (top-left corner).
+`config/arena_map.yaml` is the single source of truth for the arena: 3x3 m,
+frame origin at the SW corner, A top-left, B top-right, C bottom-right, D bottom-left,
+classification table on the left wall between A and D.
 
-Usage:  python3 make_arena.py --seed 3 --out .
-Same seed -> same brick layout and board. Seed only changes types, never positions.
+Usage:
+    python3 make_arena.py                 # reads ../config/arena_map.yaml
+    python3 make_arena.py --out .         # write here
+    python3 make_arena.py --seed 3        # accepted for compatibility; map is fixed
+
+The seed no longer changes brick types: the map lists them explicitly so simulation
+and field runs describe the same layout. Use `--randomize-types` to shuffle the nine
+first-tier types while keeping their counts.
 """
+
 import argparse
 import json
-import math
 import os
 import random
 
-HALF = 1.5                      # arena is 3 m x 3 m
-WALL_H = 0.4
+import yaml
+
 BRICK = 0.10
-PITCH = BRICK + 0.045           # 4.5 cm gap between bricks
-ZONES = {"A": (-1, 1), "B": (1, 1), "C": (1, -1), "D": (-1, -1)}
 YELLOW, GREEN, RED = (1.0, 0.75, 0.0), (0.4, 1.0, 0.6), (0.8, 0.0, 0.0)
 COLORS = {"doll": (0.55, 0.35, 0.2), "clock": (0.85, 0.85, 0.85),
           "banana": (0.95, 0.85, 0.15), "cake": (0.9, 0.3, 0.4)}
-TABLE = {"x": -HALF + 0.165, "y": 0.0, "sx": 0.33, "sy": 0.40, "sz": 0.20}
 
 
 def rgba(c):
@@ -55,102 +58,115 @@ def model(name, pose, body, static=True):
         name, "true" if static else "false", x, y, z, body)
 
 
-def build(seed):
-    rng = random.Random(seed)
+def build(map_data, randomize_types=False):
+    arena = map_data["arena"]
+    x0, y0 = arena["origin"]
+    width, height = arena["size"]
+    wall_h = arena.get("wall_height", 0.4)
     parts = []
 
-    # walls: 3 m x 3 m interior, 0.4 m high
+    # walls just outside the arena rectangle
     t = 0.02
     for name, pos, size in (
-        ("wall_n", (0, HALF + t / 2, WALL_H / 2), (2 * HALF + 2 * t, t, WALL_H)),
-        ("wall_s", (0, -HALF - t / 2, WALL_H / 2), (2 * HALF + 2 * t, t, WALL_H)),
-        ("wall_e", (HALF + t / 2, 0, WALL_H / 2), (t, 2 * HALF, WALL_H)),
-        ("wall_w", (-HALF - t / 2, 0, WALL_H / 2), (t, 2 * HALF, WALL_H)),
+        ("wall_n", (x0 + width / 2, y0 + height + t / 2, wall_h / 2), (width + 2 * t, t, wall_h)),
+        ("wall_s", (x0 + width / 2, y0 - t / 2, wall_h / 2), (width + 2 * t, t, wall_h)),
+        ("wall_e", (x0 + width + t / 2, y0 + height / 2, wall_h / 2), (t, height, wall_h)),
+        ("wall_w", (x0 - t / 2, y0 + height / 2, wall_h / 2), (t, height, wall_h)),
     ):
         parts.append(model(name, pos, link(name, size, (0.95, 0.95, 0.95))))
 
-    # floor zones (visual only): 1 m x 1 m transport, 0.45 m collection in the corner
+    # 1x1 transport squares and 0.45 m red collection squares
     zones = {}
-    for z, (sx, sy) in ZONES.items():
-        tc = YELLOW if z in "AD" else GREEN
-        parts.append(model("zone_%s" % z, (sx * 1.0, sy * 1.0, 0.0005),
-                           link("zone_%s" % z, (1.0, 1.0, 0.001), tc, collision=False)))
-        cc = (sx * (HALF - 0.225), sy * (HALF - 0.225))
-        parts.append(model("collect_%s" % z, (cc[0], cc[1], 0.0015),
-                           link("collect_%s" % z, (0.45, 0.45, 0.001), RED, collision=False)))
-        zones[z] = {"transport_center": [sx * 1.0, sy * 1.0], "collection_center": list(cc)}
+    for zone, info in map_data["zones"].items():
+        tc = info["transport_center"]
+        cc = info["collection_center"]
+        fill = YELLOW if zone in ("A", "D") else GREEN
+        parts.append(model("zone_%s" % zone, (tc[0], tc[1], 0.0005),
+                           link("zone_%s" % zone, (1.0, 1.0, 0.001), fill, collision=False)))
+        parts.append(model("collect_%s" % zone, (cc[0], cc[1], 0.0015),
+                           link("collect_%s" % zone, (0.45, 0.45, 0.001), RED,
+                                collision=False)))
+        zones[zone] = {"transport_center": list(tc), "collection_center": list(cc)}
 
-    # sorting table on the west wall
-    parts.append(model("sort_table", (TABLE["x"], TABLE["y"], TABLE["sz"] / 2),
-                       link("sort_table", (TABLE["sx"], TABLE["sy"], TABLE["sz"]), (0.75, 0.75, 0.75))))
+    # classification table
+    table = map_data["table"]
+    tx, ty = table["center"]
+    sx, sy = table["size"]
+    th = table["height"]
+    parts.append(model("sort_table", (tx, ty, th / 2),
+                       link("sort_table", (sx, sy, th), (0.75, 0.75, 0.75))))
 
-    # board: three types read left -> right (assumes robot faces west at the table,
-    # so left = south = -y). Left-to-right maps to zones B, C, D.
-    board = ["doll", "clock", "banana"]
-    rng.shuffle(board)
-    for i, ty in enumerate(board):
-        parts.append(model("board_%d" % i, (TABLE["x"], (i - 1) * 0.12, TABLE["sz"] + 0.001),
-                           link("board_%d" % i, (0.10, 0.10, 0.002), COLORS[ty], collision=False)))
+    # board cards on the table top, left -> right for a robot facing west
+    board = list(map_data["board_left_to_right"])
+    cards_y = map_data["board"]["cards_y"]
+    for i, (ty_card, cy) in enumerate(zip(board, cards_y)):
+        parts.append(model("board_%d" % i, (tx, cy, th + 0.001),
+                           link("board_%d" % i, (0.10, 0.10, 0.002),
+                                COLORS.get(ty_card, (0.5, 0.5, 0.5)), collision=False)))
 
-    # centre brick grid: 3 doll, 3 clock, 3 banana; centre cell is a fixed clock; cake on top
-    cells = [(r, c) for r in range(3) for c in range(3) if (r, c) != (1, 1)]
-    types = ["doll"] * 3 + ["clock"] * 2 + ["banana"] * 3
-    rng.shuffle(types)
-    bricks = [{"name": "brick_1_1", "type": "clock", "row": 1, "col": 1, "layer": 1,
-               "x": 0.0, "y": 0.0}]
-    for (r, c), ty in zip(cells, types):
-        bricks.append({"name": "brick_%d_%d" % (r, c), "type": ty, "row": r, "col": c,
-                       "layer": 1, "x": (c - 1) * PITCH, "y": (1 - r) * PITCH})
-    bricks.append({"name": "cake", "type": "cake", "row": 1, "col": 1, "layer": 2,
-                   "x": 0.0, "y": 0.0})
+    # centre bricks (fixed types from the map, or shuffled first-tier types)
+    bricks = [dict(b) for b in map_data["bricks"]]
+    if randomize_types:
+        first = [b for b in bricks if b.get("layer") == 1 and (b["row"], b["col"]) != (1, 1)]
+        types = [b["type"] for b in first]
+        random.shuffle(types)
+        for b, ty in zip(first, types):
+            b["type"] = ty
+
     for b in bricks:
-        z = BRICK / 2 + (BRICK + 0.0005 if b["layer"] == 2 else 0.0)
+        z = 0.05 + (0.1005 if b.get("layer") == 2 else 0.0)
         parts.append(model(b["name"], (b["x"], b["y"], z),
-                           link(b["name"], (BRICK, BRICK, BRICK), COLORS[b["type"]],
-                                mass=0.05, friction=True), static=False))
+                           link(b["name"], (BRICK, BRICK, BRICK),
+                                COLORS[b["type"]], mass=0.05, friction=True),
+                           static=False))
 
     world = (
         "<?xml version='1.0' ?>\n<sdf version='1.6'>\n<world name='spark_arena'>\n"
         "<include><uri>model://sun</uri></include>\n"
         "<include><uri>model://ground_plane</uri></include>\n"
-        "<gui><camera name='user_camera'><pose>0 0 5 0 1.5708 0</pose></camera></gui>\n"
+        "<gui><camera name='user_camera'><pose>%.2f %.2f 5 0 1.5708 0</pose></camera></gui>\n"
+        % (x0 + width / 2, y0 + height / 2)
         + "\n".join(parts) + "\n</world>\n</sdf>\n")
 
-    pts = {
-        "Classification_area": [-0.90, 0.0],
-        "Sorting_N": [0.0, 0.38], "Sorting_W": [-0.38, 0.0],
-        "Sorting_S": [0.0, -0.38], "Sorting_E": [0.38, 0.0],
-    }
-    for z, (sx, sy) in ZONES.items():
-        # Red collection square centre (0.45 x 0.45 m in the corner).
-        cx, cy = sx * (HALF - 0.225), sy * (HALF - 0.225)
-        pts["Collection_%s" % z] = [cx, cy]
-        # Chassis stand-off for the arm: 0.35 m inwards from the square centre.
-        # Placing 0.30 m ahead of the robot from here lands inside the red square.
-        k = 0.35 / math.sqrt(2.0)
-        pts["Collection_%s_approach" % z] = [cx - sx * k, cy - sy * k]
     scenario = {
-        "seed": seed,
+        "frame": map_data.get("frame", "arena"),
+        "arena": arena,
+        "table": table,
         "bricks": bricks,
         "board_left_to_right": board,
-        "board_zones": ["B", "C", "D"],
+        "board_zones": list(map_data["board_zones"]),
         "zones": zones,
-        "start_pose": {"x": -HALF + 0.225, "y": HALF - 0.225, "yaw": -1.5708},
-        "points": pts,
-        "note": "points are approximate stand-ins; real ones come from your mapping step",
+        "points": {k: list(v) for k, v in map_data["points"].items()},
+        "start_pose": dict(map_data["start_pose"]),
+        "note": "generated from config/arena_map.yaml; origin at the arena SW corner",
     }
     return world, scenario
 
 
-if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--seed", type=int, default=0)
+def main():
+    here = os.path.dirname(os.path.abspath(__file__))
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--map", default=os.path.join(here, "..", "config", "arena_map.yaml"))
+    ap.add_argument("--seed", type=int, default=3, help="kept for compatibility")
+    ap.add_argument("--randomize-types", action="store_true",
+                    help="shuffle the nine first-tier brick types")
     ap.add_argument("--out", default=".")
-    a = ap.parse_args()
-    w, s = build(a.seed)
-    os.makedirs(a.out, exist_ok=True)
-    with open(os.path.join(a.out, "arena.world"), "w") as f:
-        f.write(w)
-    with open(os.path.join(a.out, "scenario.json"), "w") as f:
-        json.dump(s, f, indent=2)
-    print("wrote arena.world and scenario.json (seed %d, board %s)" % (a.seed, s["board_left_to_right"]))
+    args = ap.parse_args()
+
+    with open(args.map) as f:
+        map_data = yaml.safe_load(f)
+
+    world, scenario = build(map_data, randomize_types=args.randomize_types)
+    scenario["seed"] = args.seed
+    os.makedirs(args.out, exist_ok=True)
+    with open(os.path.join(args.out, "arena.world"), "w") as f:
+        f.write(world)
+    with open(os.path.join(args.out, "scenario.json"), "w") as f:
+        json.dump(scenario, f, indent=2)
+    print("wrote arena.world and scenario.json from %s" % os.path.basename(args.map))
+    print("board L->R: %s   start: %s" % (
+        scenario["board_left_to_right"], scenario["start_pose"]))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,43 @@
+# Full competition-style mission: cake first, then all nine remaining cubes.
+#
+# The `fetch` step is adaptive:
+#   1. find the nearest pending cube of the class,
+#   2. drive to the Sorting_N/S/E/W stand-off closest to that cube,
+#   3. run the agreement gate and pick,
+#   4. deliver to the zone from the classification board (cake -> A always),
+#   5. place and verify.
+#
+# Watch it at http://127.0.0.1:8090/:
+#   cd simulation/codes
+#   python3 run_live.py --mission ../config/mission_competition.yaml --speed 2
+
+name: competition_all_cubes
+description: >
+  Read the board, deliver the cake to A first, then fetch three bears, three
+  clocks and three bananas to their board-mapped zones.
+clock_budget_s: 540
+
+steps:
+  - goto:
+      point: Classification_area
+      tol: 0.08
+  - read_board: {}
+
+  # Cake MUST be first, to zone A.
+  - fetch:
+      class: cake
+      count: 1
+      level: 1
+
+  - fetch:
+      class: bear
+      count: 3
+      level: 1
+  - fetch:
+      class: clock
+      count: 3
+      level: 1
+  - fetch:
+      class: banana
+      count: 3
+      level: 1

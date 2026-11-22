@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Spark Simulation - Commands</title>
+<style>
+  body { font-family: sans-serif; max-width: 960px; margin: 2em auto; line-height: 1.5; }
+  h1 { border-bottom: 2px solid #333; padding-bottom: .3em; }
+  h2 { margin-top: 1.8em; border-bottom: 1px solid #ccc; padding-bottom: .2em; }
+  h3 { margin-top: 1.2em; }
+  pre { background: #f2f2f2; padding: .8em; overflow-x: auto; }
+  code { background: #f2f2f2; padding: 0 .2em; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ccc; padding: .3em .6em; text-align: left; vertical-align: top; }
+  .note { background: #fff8e1; padding: .7em; border-left: 4px solid #f0c000; }
+  .warn { background: #ffebee; padding: .7em; border-left: 4px solid #d32f2f; }
+  .ok { background: #e8f5e9; padding: .7em; border-left: 4px solid #2e7d32; }
+</style>
+</head>
+<body>
+
+<h1>Spark Simulation - Commands</h1>
+<p>Workspace: <code>~/Documents/Extra/ROS Comp/simulation</code>.
+There are two simulators and one real-robot check:</p>
+<ul>
+  <li><strong>Kinematic sim</strong> on this PC, browser view at
+      <code>http://127.0.0.1:8090/</code>; no ROS.</li>
+  <li><strong>Gazebo sim</strong> on the Spark NUC (Ubuntu 20.04 / ROS Noetic), isolated on
+      ROS master <code>11312</code>.</li>
+  <li><strong>Detection-bridge check</strong> on the real robot, passive, hardware master
+      <code>11311</code>.</li>
+</ul>
+<div class="warn">
+<p><strong>Master rule:</strong> the hardware stack runs on <code>11311</code>. Every
+simulation command in this sheet uses <code>11312</code> or no ROS at all.
+Never point the sim scripts at <code>11311</code>.</p>
+</div>
+<div class="note">
+<p><strong>No credentials or fixed IPs in this sheet.</strong> Passwords are not stored
+in the repository; use the operator's private notes. The robot IP is DHCP: read it from
+the launcher / <code>robot_ip.txt</code> (gitignored) or pass <code>ROBOT_IP</code>.
+Placeholders <code>&lt;robot-ip&gt;</code> and <code>&lt;pc-ip&gt;</code> in commands are
+intentional.</p>
+</div>
+
+<h2>Quick reference</h2>
+<table>
+  <tr><th>Goal</th><th>Command</th><th>Where</th></tr>
+  <tr><td>Watch the full 10-cube mission</td>
+      <td><code>cd simulation/codes &amp;&amp; python3 run_live.py --mission ../config/mission_competition.yaml --speed 2</code></td>
+      <td>PC, open :8090</td></tr>
+  <tr><td>Demo mission (cake only)</td>
+      <td><code>python3 run_live.py</code></td><td>PC, open :8090</td></tr>
+  <tr><td>Headless full mission + report</td>
+      <td><code>python3 run_live.py --no-realtime --no-viewer --mission ../config/mission_competition.yaml --report ../runs/competition.json</code></td>
+      <td>PC</td></tr>
+  <tr><td>Unit tests (80)</td>
+      <td><code>python3 -m unittest discover -s tests</code></td><td>PC</td></tr>
+  <tr><td>Start Gazebo + nav on Spark</td>
+      <td><code>bash ~/codes/robot/start_sim.sh</code></td><td>Spark</td></tr>
+  <tr><td>Run full mission in Gazebo</td>
+      <td><code>bash ~/codes/robot/run_mission_robot_sim.sh</code></td><td>Spark</td></tr>
+  <tr><td>Markers / RViz on Spark</td>
+      <td><code>bash ~/codes/robot/start_viz_robot_sim.sh</code><br>
+          <code>bash ~/codes/robot/start_rviz_robot_sim.sh</code></td><td>Spark, VNC 5900</td></tr>
+  <tr><td>Stop the Spark sim</td>
+      <td><code>bash ~/codes/robot/stop_sim.sh</code></td><td>Spark</td></tr>
+  <tr><td>RViz on the PC (ROS1 in Docker)</td>
+      <td><code>cd simulation/docker &amp;&amp; ROBOT_IP=&lt;robot-ip&gt; ./run_pc_rviz.sh</code></td><td>PC</td></tr>
+  <tr><td>Real-robot bridge check</td>
+      <td><code>python3 -u ~/codes/bridge_check.py _mode:=dlt ...</code></td><td>Spark (11311)</td></tr>
+  <tr><td>Check the real camera driver</td>
+      <td><code>rostopic hz /camera/color/image_raw</code> (expect ~30 Hz)</td><td>Spark (11311)</td></tr>
+  <tr><td>Start camera driver + stream</td>
+      <td><code>roslaunch camera_driver_transfer d435.launch</code><br>
+          <code>python3 -u ~/auto/codes/camera_stream.py</code></td><td>Spark, open :8080</td></tr>
+  <tr><td>Stop the camera stream</td>
+      <td><code>fuser -k 8080/tcp</code><br><code>pkill -f "[d]435.launch"</code></td><td>Spark</td></tr>
+</table>
+
+<h2>1. Kinematic simulation on the PC</h2>
+<p>No ROS, no robot. Runs <code>fake_world.py</code> + <code>mission_logic.py</code> and serves
+a canvas view from <code>live_view.py</code>.</p>
+<pre>cd "$HOME/Documents/Extra/ROS Comp/simulation/codes"
+
+# full competition: board -> cake A -> bears B -> clocks C -> bananas D
+python3 run_live.py --mission ../config/mission_competition.yaml --speed 2
+
+# demo: A -> centre -> pick cake -> A
+python3 run_live.py
+</pre>
+<p>Open <code>http://127.0.0.1:8090/</code> after the viewer starts. The page shows the
+robot, lidar, trail, cubes, score, current fetch class and the step list.</p>
+<p>The robot plans with A* around every field cube and the table, inflated by the robot
+radius plus 3 cm; <code>FakeWorld.step</code> also checks cube collision. It drives
+around the central cluster, not through it.</p>
+<h3>Options</h3>
+<pre>--speed 2            # playback multiplier (sim time is unchanged)
+--port 8090          # change if the port is busy
+--start-delay 30     # wait before the mission starts
+--linger 300         # keep serving after DONE (0 = until Ctrl+C)
+--seed 7             # detection noise/dropout seed
+--mission PATH       # mission YAML
+--no-viewer          # console only
+--no-realtime        # run as fast as possible (tests)
+--report PATH        # write the run report JSON with per-step timings
+</pre>
+<h3>Verified results</h3>
+<div class="ok">
+<p><code>mission_competition.yaml</code>: <strong>DONE, score 21, 340.1 s simulated,
+0 collisions</strong>. Cake to A first, 3 bears to B, 3 clocks to C, 3 bananas to D; every
+placement verified. Demo mission: score 3, 28.6 s.</p>
+</div>
+<h3>Missions and data</h3>
+<pre>config/mission_demo.yaml           # cake demo
+config/mission_competition.yaml    # cake + all 9 blocks, adaptive fetch
+config/arena_map.yaml              # canonical 0..3 m arena (A top-left)
+config/robot.yaml                  # measured chassis/arm parameters
+config/gate.yaml                   # gate thresholds + injection
+config/transform_3d.dat            # production 4x3 DLT pixel -> arm
+</pre>
+<p>The <code>fetch</code> step picks the nearest pending cube, drives to the closest
+Sorting side, gates/picks, then delivers to <code>memory.mapping[class]</code> and verifies.</p>
+
+<h2>2. Gazebo simulation on the Spark NUC</h2>
+<p>Spark is Ubuntu 20.04 / ROS Noetic with Gazebo Classic 11. The sim uses an isolated
+ROS master <code>11312</code> and a static arena map; the hardware stack on
+<code>11311</code> is never touched.</p>
+<pre># Terminal 1 - Gazebo + map_server + AMCL + move_base (master 11312)
+bash ~/codes/robot/start_sim.sh
+
+# Terminal 2 - synthetic truth detections + arm mock + mission node
+bash ~/codes/robot/run_mission_robot_sim.sh
+
+# Markers for RViz
+bash ~/codes/robot/start_viz_robot_sim.sh
+
+# RViz on the robot desktop :0 (viewed over VNC)
+bash ~/codes/robot/start_rviz_robot_sim.sh
+</pre>
+<p>View: VNC to <code>&lt;robot-ip&gt;:5900</code> (credentials as configured on the robot; not stored here). The
+<code>sim_view.rviz</code> layout includes Map, LaserScan, TF, RobotModel,
+<code>/mission_markers</code> and <code>/detection_markers</code>.</p>
+<pre># Stop Gazebo, nav, mission, markers and RViz; 11311 stays up
+bash ~/codes/robot/stop_sim.sh
+</pre>
+<h3>Verified results</h3>
+<ul>
+  <li>Nav goal <code>Sorting_N</code> (1.5, 1.88, -pi/2): status <strong>3, Goal reached</strong>.</li>
+  <li>Full mission: <strong>DONE, cake delivered</strong>, all steps ok;
+      goto 15.4 / 9.8 s, pick 3.4 s, place 2.0 s, verify 0.5 s (~31.7 s).</li>
+  <li>Gazebo model starts at <code>(0.231, 2.780)</code> yaw -0.793 — inside A.
+      AMCL's localized pose is ~12 cm off but still inside the 0.45 m A square.</li>
+</ul>
+<div class="note">
+<p>The Gazebo mission uses <strong>synthetic detections and an arm mock</strong>; it
+validates mission/nav/gate/verify, not physical perception or the real arm.
+Restart the sim for a fresh mission: the truth node has already moved the cubes.</p>
+</div>
+
+<h2>3. RViz on the PC (ROS1 in Docker)</h2>
+<p>This PC has ROS 2 Humble; <code>rviz2</code> cannot talk to a ROS 1 master. Use the
+Noetic container with the <code>spark_sim:noetic</code> image.</p>
+<pre># One-time
+sudo docker pull osrf/ros:noetic-desktop-full
+cd "$HOME/Documents/Extra/ROS Comp/simulation/docker"
+sudo docker build -t spark_sim:noetic .
+
+# Robot Gazebo sim must be running on 11312
+newgrp docker
+ROBOT_IP=<robot-ip> ./run_pc_rviz.sh
+
+# Stop the PC viewer
+sg docker -c 'docker stop pc_rviz'
+</pre>
+<p><code>run_pc_rviz.sh</code> sets:</p>
+<pre>ROS_MASTER_URI=http://<robot-ip>:11312   # current DHCP address
+ROS_IP=<pc-ip>                          # this PC LAN address
+ROS_PACKAGE_PATH=/ws/assets             # Spark meshes
+rviz -d /ws/ros/sim_view.rviz
+</pre>
+<p>The robot IP is DHCP. Read it from the launcher / <code>robot_ip.txt</code> (gitignored), or set <code>ROBOT_IP</code>; the PC IP is auto-detected unless <code>PC_IP</code> is set.
+The robot sim scripts bind the robot's LAN IP so remote RViz can connect.</p>
+<div class="note">
+<p>Plain <code>rosrun rviz rviz</code> over SSH fails with
+<code>could not connect to display</code>. On the robot use
+<code>DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority</code>, or the
+<code>start_rviz_robot_sim.sh</code> script, then view over VNC.</p>
+</div>
+
+<h2>4. Real Spark (Ubuntu Noetic) basics</h2>
+<pre>ssh spark@&lt;robot-ip&gt;          # use the operator credentials (not stored in this repo)
+source /opt/ros/noetic/setup.bash
+source ~/spark_noetic/devel/setup.bash
+
+bash ~/codes/start_system.sh  # hardware stack (master 11311)
+bash ~/codes/dashboard.sh     # control menu
+bash ~/codes/stop_system.sh
+</pre>
+<p>Camera stream: <code>http://&lt;robot-ip&gt;:8080/</code>. VNC: port <code>5900</code>.
+The hardware stack keeps the camera and detector running; the sim scripts use a separate
+master.</p>
+
+<h2>4b. Real camera web stream (MJPEG on :8080)</h2>
+<p><code>camera_stream.py</code> serves the live D435 feed over HTTP so it opens in any browser.
+It subscribes to <code>/camera/color/image_raw</code>, so the camera driver must be running first.
+It uses the hardware master (<code>11311</code>); do not change <code>ROS_MASTER_URI</code>.</p>
+<div class="note">
+<p>On the current Ubuntu Spark the script is at <code>~/auto/codes/camera_stream.py</code>
+(older sheets say <code>~/codes/</code>). Verify with
+<code>ls ~/auto/codes/camera_stream.py</code> before starting.</p>
+</div>
+
+<h3>Check the driver</h3>
+<pre>ssh spark@&lt;robot-ip&gt;
+source /opt/ros/noetic/setup.bash
+source ~/spark_noetic/devel/setup.bash
+
+pgrep -af "roslaunch camera_driver_transfer"   # one launch, or nothing
+timeout 5 rostopic hz /camera/color/image_raw  # expect ~30 Hz
+</pre>
+<p>No publisher and no rate means the driver is not streaming; the web page then answers
+<code>503 no frame yet</code>. A bringup started with <code>start_camera:=false</code> does
+<strong>not</strong> start the camera — use the command below.</p>
+
+<h3>Start the driver (once)</h3>
+<pre>source /opt/ros/noetic/setup.bash
+source ~/spark_noetic/devel/setup.bash
+setsid nohup roslaunch camera_driver_transfer d435.launch \
+  &gt; ~/logs/camera_driver.log 2&gt;&amp;1 &lt; /dev/null &amp;
+</pre>
+<div class="warn">
+<p><strong>Only one driver at a time.</strong> Starting a second
+<code>camera_driver_transfer</code> while one is running makes the RealSense nodelet exit with
+<code>Bond broken, exiting</code>, and the stream stays blank.</p>
+</div>
+
+<h3>Start the streamer</h3>
+<pre>source /opt/ros/noetic/setup.bash
+setsid nohup python3 -u ~/auto/codes/camera_stream.py \
+  &gt; ~/logs/stream.log 2&gt;&amp;1 &lt; /dev/null &amp;
+</pre>
+<p>Open <code>http://&lt;robot-ip&gt;:8080/</code>; a single frame is at
+<code>http://&lt;robot-ip&gt;:8080/snapshot.jpg</code>.</p>
+
+<h3>Stop</h3>
+<pre>fuser -k 8080/tcp          # stream server (only the listener on 8080)
+pkill -f "[d]435.launch"   # camera driver (the [d] stops pkill matching its own shell)
+</pre>
+<div class="note">
+<p>Do not run <code>pkill -f camera_stream.py</code> in a command that also contains that path
+(for example the same SSH command that starts it): <code>pkill -f</code> matches its own shell
+and kills the session before the server starts. <code>fuser -k 8080/tcp</code> is sufficient.</p>
+</div>
+
+<h2>4c. Production arm calibration (real robot)</h2>
+<p>Full command sheet: <code>auto/docs/commands.html</code>. There are two calibrations and they
+write different files:</p>
+<ul>
+  <li><strong>Orange-pad DLT</strong> &rarr; <code>~/transform_3d.dat</code> and
+      <code>~/transform_3d.meta.json</code>; used by <code>grasp_generic.py</code> and the current
+      grasp tests.</li>
+  <li><strong>Vendor red-square one-key</strong> &rarr; <code>~/thefile.txt</code>; old vendor 2D
+      path.</li>
+</ul>
+<pre># active DLT check (SSH; base/camera/arm running)
+python3 -u ~/codes/calib3d.py --check
+# require a real PASS, a visible pad and pad movement <= 6 px
+
+# full fit only if the check fails
+python3 -u ~/codes/calib3d.py
+python3 -u ~/codes/calib3d.py --check
+
+# vendor red-square one-key: Spark desktop/VNC terminal only
+cd ~/spark_noetic &#38;&#38; ./onekey.sh    # 8, uArm, align green icon in red box, Enter
+ls -l ~/thefile.txt</pre>
+<div class="warn">
+<p>The one-key can move the camera. Re-run the DLT check afterwards. If the D435 logs
+<code>Frames didn't arrive within 5 seconds</code>, unplug/replug the camera USB or reboot before
+starting the normal stack. Do not run the one-key and the normal
+<code>driver_bringup</code>/arm stack at the same time; the one-key starts its own base, camera
+and arm.</p>
+</div>
+
+<h2>5. Detection bridge on the real robot</h2>
+<p>The real D435 image is top-down while the URDF camera TF is horizontal. Do <strong>not</strong>
+use pinhole mode on the robot; use the production DLT matrix.</p>
+<pre># Passive projection check against a measured cube (base frame)
+python3 -u ~/codes/bridge_check.py \
+  _mode:=dlt _matrix:=$HOME/codes/transform_3d.dat \
+  _target_frame:=base_footprint \
+  _expected_class:=bear _expected_x:=0.30 _expected_y:=0.00 \
+  _samples:=20
+
+# Map frame (AMCL/nav running)
+python3 -u ~/codes/bridge_check.py \
+  _mode:=dlt _target_frame:=map \
+  _expected_class:=cake _expected_x:=1.5 _expected_y:=1.5
+
+# Live bridge + RViz markers (base frame; FRAME=map for map)
+bash ~/codes/robot/run_detection_view.sh
+FRAME=map bash ~/codes/robot/run_detection_view.sh
+
+# Bridge only
+python3 ~/codes/detection_bridge.py \
+  _mode:=dlt _target_frame:=map \
+  _matrix:=$HOME/codes/transform_3d.dat \
+  _world:=$HOME/codes/config/arena_map.yaml _debug:=true
+</pre>
+<p>DLT heights: floor cubes <code>z=-100 mm</code>, cake <code>z=0 mm</code>. Arm mount:
+<code>base_link -> Base = (0.044, 0, 0.138)</code>, no rotation.</p>
+<h3>Verified passive result</h3>
+<div class="ok">
+<p>Real detector, no movement: bear at base <code>(0.246, -0.010) m</code>, arm
+<code>(202, -9.6) mm</code>, stable to 1–2 mm. <code>/detections_world_test</code> carried
+<code>{"class":"bear","confidence":0.93,"x":0.246,"y":-0.01}</code>.</p>
+</div>
+<p>Acceptance and troubleshooting: <code>docs/BRIDGE_VALIDATION.md</code>.</p>
+
+<h2>5b. Scan and back: D → W → D</h2>
+<p>Validated on the real arena (2026-11-22/23). Starts in the D collection square, drives
+to the west sorting stand-off, scans, and returns to D. Uses the sorting points after the
+3 cm outward bias and the tighter goal tolerance from
+<code>~/codes/config/move_base_tuning.yaml</code>.</p>
+
+<h3>Before starting</h3>
+<p>Place the robot in the <strong>D collection square</strong>: wheel-axle centre at
+<code>(0.225, 0.225)</code>, 22.5 cm from the south and west walls, nose at
+<code>+45°</code> towards the arena centre. Keep the charger out of the drive path — a
+step under the wheels corrupts odometry and makes AMCL drift.</p>
+
+<h3>Terminal 1 — chassis and camera</h3>
+<pre>source /opt/ros/noetic/setup.bash
+source ~/spark_noetic/devel/setup.bash
+roslaunch spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6
+</pre>
+
+<h3>Terminal 2 — lidar (driver_bringup does NOT start it)</h3>
+<pre>source /opt/ros/noetic/setup.bash
+source ~/spark_noetic/devel/setup.bash
+roslaunch lidar_driver_transfer ydlidar_g6.launch
+</pre>
+<div class="note">
+<p>Wait for <code>/scan</code> at ~10 Hz (<code>rostopic hz /scan</code>) and
+<code>/odom</code> at ~12 Hz (<code>rostopic hz /odom</code>). If <code>/odom</code> is
+silent after a power cycle, the base's USB re-enumerated:
+<code>rosnode kill /spark_base_server</code> then
+<code>roslaunch spark_base spark_base.launch serialport:=/dev/sparkBase</code>.</p>
+</div>
+
+<h3>Terminal 3 — map + AMCL + move_base</h3>
+<pre>source /opt/ros/noetic/setup.bash
+source ~/spark_noetic/devel/setup.bash
+export INIT_X=0.225 INIT_Y=0.225 INIT_A=0.785398
+bash ~/codes/nav_bringup.sh
+</pre>
+<p>Check that AMCL agrees with where you placed the robot and that the tuned tolerance
+is live:</p>
+<pre>rosrun tf tf_echo map base_footprint
+# expect ~ (0.225, 0.225) and 45 deg
+
+rosparam get /move_base/DWAPlannerROS/xy_goal_tolerance
+# expect 0.03
+</pre>
+
+<h3>Terminal 4 — drive, scan, return</h3>
+<pre># D -> W: west sorting stand-off, facing the cluster
+python3 ~/codes/go_point.py 1.09 1.50 0
+
+# Optional: see what the camera reports at W
+python3 ~/codes/detect_ros.py _augment:=true &amp;
+python3 ~/codes/detection_bridge.py _mode:=dlt _target_frame:=map \
+  _matrix:=$HOME/codes/config/transform_3d.dat \
+  _world:=$HOME/codes/config/arena_map.yaml
+rostopic echo /detections_world
+
+# W -> D
+python3 ~/codes/go_point.py 0.225 0.225 45
+</pre>
+<p>Each goal prints <code>RESULT ok=True state=3</code> (SUCCEEDED). Expected arrival is
+within ~2 cm and ~5°; the yaw reading is AMCL estimate noise. The detector's cake gate is
+0.90 for <code>cake</code> and 0.60 for <code>cake_site</code> (wine = class 2/20); with
+<code>_augment:=true</code> the cake is reported at ~0.8–0.9 from the west side.</p>
+
+<h3>Stop</h3>
+<pre># stop motion, keep the navigation stack up
+rostopic pub -1 /move_base/cancel actionlib_msgs/GoalID "{}"
+
+# stop the navigation nodes
+rosnode kill /move_base /amcl /navigation_velocity_smoother
+</pre>
+<p>Terminals 1 and 2 are stopped with Ctrl-C. If the robot does not stop, power it off.
+Do not drive over the charger.</p>
+
+<h2>6. Map and static files</h2>
+<pre>cd "$HOME/Documents/Extra/ROS Comp/simulation/codes"
+
+python3 static_map.py              # -> ../maps/arena_map.{pgm,yaml,png}
+python3 make_arena.py --out .      # -> arena.world + scenario.json from arena_map.yaml
+python3 view_run.py --seed 3       # -> ../runs/mission_demo_seed3.{png,gif}
+</pre>
+<p>The map is 60x60 cells at 0.05 m, origin <code>[0,0,0]</code>; walls and table occupied.
+Cubes are dynamic objects, not in the static map.</p>
+
+<h2>7. Deploy to Spark</h2>
+<pre>cd "$HOME/Documents/Extra/ROS Comp/simulation"
+ROBOT=spark@&lt;robot-ip&gt;
+
+rsync -av config/ "$ROBOT":~/codes/config/
+rsync -av maps/   "$ROBOT":~/codes/maps/
+rsync -av codes/*.py "$ROBOT":~/codes/
+rsync -av ros/    "$ROBOT":~/codes/ros/
+rsync -av robot/  "$ROBOT":~/codes/robot/
+ssh "$ROBOT" 'chmod +x ~/codes/robot/*.sh'
+</pre>
+<p>The robot sim additionally needs <code>~/codes/sim/{arena.world,
+spark1_description_nav.urdf,spark_arena.launch}</code>; see <code>robot/README.md</code>.</p>
+
+<h2>8. Ports and topics</h2>
+<table>
+  <tr><th>Port / topic</th><th>Meaning</th></tr>
+  <tr><td><code>8090</code></td><td>kinematic browser viewer (PC)</td></tr>
+  <tr><td><code>8080</code></td><td>real D435 MJPEG stream</td></tr>
+  <tr><td><code>5900</code></td><td>robot VNC desktop (credentials as configured; not stored here)</td></tr>
+  <tr><td><code>11311</code></td><td>hardware ROS master — never use for sims</td></tr>
+  <tr><td><code>11312</code></td><td>Gazebo sim ROS master</td></tr>
+  <tr><td><code>/mission_state</code></td><td>JSON mission snapshot (mission node)</td></tr>
+  <tr><td><code>/detections_world</code></td><td>JSON detections with world poses</td></tr>
+  <tr><td><code>/mission_markers</code></td><td>RViz zones, cube memory, statuses</td></tr>
+  <tr><td><code>/detection_markers</code></td><td>RViz live detections</td></tr>
+  <tr><td><code>/scan</code>, <code>/odom</code>, <code>/map</code></td>
+      <td>Gazebo sim nav topics</td></tr>
+</table>
+
+<h2>9. Stop / cleanup</h2>
+<pre># Spark sim (Gazebo, nav, mission, markers, RViz; 11311 untouched)
+bash ~/codes/robot/stop_sim.sh
+
+# PC RViz container
+sg docker -c 'docker stop pc_rviz'
+
+# kinematic viewer: Ctrl+C in its terminal, or
+pkill -f run_live.py
+
+# real camera stream + driver (hardware master 11311)
+fuser -k 8080/tcp
+pkill -f "[d]435.launch"
+</pre>
+
+<h2>10. Tests</h2>
+<pre>cd "$HOME/Documents/Extra/ROS Comp/simulation/codes"
+python3 -m unittest discover -s tests -v     # 80 tests
+</pre>
+
+<h2>Related documents</h2>
+<ul>
+  <li><code>docs/ALGORITHM.md</code> — mission FSM, gate, adaptive fetch, pseudocode</li>
+  <li><code>docs/INTERFACES.md</code> — ROS topics/services and arm contract</li>
+  <li><code>docs/BRIDGE_VALIDATION.md</code> — real-robot DLT validation</li>
+  <li><code>docs/ROS_INTEGRATION.md</code> — deploy/run on the real robot</li>
+  <li><code>docs/TIMING.md</code> — measured speeds and per-step timings</li>
+  <li><code>docs/FIELD_RISKS.md</code> — sim → real risks and pre-flight</li>
+  <li><code>robot/README.md</code>, <code>docker/README.md</code> — host-specific setup</li>
+</ul>
+
+<div class="note">
+<p><strong>Semi-auto OpenHarmony board commands</strong> are in
+<code>semi/docs/commands.html</code>. Ubuntu robot commands are also in
+<code>auto/docs/commands.html</code>. This file is simulation-only.</p>
+</div>
+
+</body>
+</html>

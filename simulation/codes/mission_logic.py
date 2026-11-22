@@ -108,6 +108,7 @@ class PickResult:
     reason: str = ""
     duration_s: float = 0.0
     retryable: bool = True
+    confirmed_pose: Optional[tuple[float, float]] = None
 
     def __post_init__(self) -> None:
         if self.confirmed_class:
@@ -260,16 +261,26 @@ class MissionMemory:
 
     # -- transitions --------------------------------------------------------
 
-    def mark_picked(self, cls: str, confirmed: Optional[str] = None) -> CubeInstance:
+    def mark_picked(self, cls: str, confirmed: Optional[str] = None,
+                    pose: Optional[tuple[float, float]] = None) -> CubeInstance:
         """Put a pending instance of `cls` into the carried state.
 
         If the arm confirmed a different class, that class is what is physically carried;
-        the caller passes it as `confirmed`.
+        the caller passes it as `confirmed`. When the gate's evidence pose is known, the
+        nearest pending instance is marked — otherwise the wrong same-class cube can be
+        marked and picked twice.
         """
         ccls = canonical_class(confirmed or cls)
-        inst = next(
-            (i for i in self.instances if i.cls == ccls and i.status == "pending"), None
-        )
+        candidates = [i for i in self.instances
+                      if i.cls == ccls and i.status == "pending"]
+        inst = None
+        if pose is not None:
+            located = [i for i in candidates if i.x is not None and i.y is not None]
+            if located:
+                inst = min(located, key=lambda i: math.hypot(i.x - pose[0],
+                                                             i.y - pose[1]))
+        if inst is None and candidates:
+            inst = candidates[0]
         if inst is None:
             # The gate said one was available; if it vanished, reacquire it rather than
             # silently carrying nothing.
@@ -335,9 +346,19 @@ class MissionMemory:
         self.log("misplaced", cls=ccls, instance=target.name)
         return target
 
-    def mark_skipped(self, cls: str) -> Optional[CubeInstance]:
+    def mark_skipped(self, cls: str,
+                     pose: Optional[tuple[float, float]] = None) -> Optional[CubeInstance]:
         ccls = canonical_class(cls)
-        inst = next((i for i in self.instances if i.cls == ccls and i.status == "pending"), None)
+        candidates = [i for i in self.instances
+                      if i.cls == ccls and i.status == "pending"]
+        inst = None
+        if pose is not None:
+            located = [i for i in candidates if i.x is not None and i.y is not None]
+            if located:
+                inst = min(located, key=lambda i: math.hypot(i.x - pose[0],
+                                                             i.y - pose[1]))
+        if inst is None and candidates:
+            inst = candidates[0]
         if inst is None:
             self.log("skip_without_instance", cls=ccls)
             return None
@@ -461,12 +482,28 @@ def _point_in_square(x: float, y: float, centre: tuple[float, float], size: floa
     return abs(x - centre[0]) <= size / 2.0 and abs(y - centre[1]) <= size / 2.0
 
 
-def _best_per_frame(frame: Sequence[Detection], cls: str, conf_min: float) -> Optional[Detection]:
+def _best_per_frame(frame: Sequence[Detection], cls: str, conf_min: float,
+                    target_pose: Optional[tuple[float, float]] = None) -> Optional[Detection]:
+    """Best detection of `cls` in a frame.
+
+    With a target pose, prefer the detection nearest that target (same-class cubes can
+    be far apart); otherwise prefer the highest confidence.
+    """
     best = None
     for d in frame or ():
         if d.cls != cls or d.confidence < conf_min:
             continue
-        if best is None or d.confidence > best.confidence:
+        if best is None:
+            best = d
+            continue
+        if target_pose is not None:
+            dp = d.pose()
+            bp = best.pose()
+            if (dp is not None and bp is not None
+                    and math.hypot(dp[0] - target_pose[0], dp[1] - target_pose[1])
+                    < math.hypot(bp[0] - target_pose[0], bp[1] - target_pose[1])):
+                best = d
+        elif d.confidence > best.confidence:
             best = d
     return best
 
@@ -488,22 +525,35 @@ class Gate:
         time_left: float = float("inf"),
         approachable: Optional[Callable[[float, float], bool]] = None,
         check_memory: bool = True,
+        target_pose: Optional[tuple[float, float]] = None,
     ) -> GateVerdict:
         cls = canonical_class(requested_class)
         th = self.th
 
-        # G1: enough votes for the requested class.
-        qualifying = [d for d in (_best_per_frame(f, cls, th.conf_min) for f in window) if d]
+        # G1: enough votes for the requested class. If the caller knows which cube it
+        # wants (fetch), each frame prefers the detection nearest that target; this
+        # stops a far same-class cube from being picked and failing G4.
+        qualifying = [d for d in (_best_per_frame(f, cls, th.conf_min, target_pose)
+                                  for f in window) if d]
         if len(qualifying) < th.votes_k:
             return GateVerdict(
                 False, GateAction.RESCAN,
                 "G1 class unconfirmed (%d/%d votes)" % (len(qualifying), th.votes_k),
             )
-        best = max(qualifying, key=lambda d: (d.confidence, d.stamp))
+        if target_pose is not None:
+            located = [d for d in qualifying if d.pose() is not None]
+            if located:
+                best = min(located, key=lambda d: math.hypot(
+                    d.pose()[0] - target_pose[0], d.pose()[1] - target_pose[1]))
+            else:
+                best = max(qualifying, key=lambda d: (d.confidence, d.stamp))
+        else:
+            best = max(qualifying, key=lambda d: (d.confidence, d.stamp))
 
-        # G2: observed pose agrees with where the map expects this cube. If memory
-        # knows individual cube positions (simulation, or a mapped field), match the
-        # nearest pending instance; otherwise fall back to the station pose.
+        # G2: observed pose agrees with where the map expects this cube. The target
+        # pose only guides G1's detection choice; G2 uses the nearest pending instance
+        # so a reachable same-class cube is not rejected when the exact target is not
+        # the one detected.
         pose = best.pose()
         expected = station_pose
         if pose is not None:
@@ -582,7 +632,7 @@ class Gate:
 # Mission definition
 # ---------------------------------------------------------------------------
 
-ALLOWED_STEPS = {"goto", "pick", "place", "verify", "read_board", "wait"}
+ALLOWED_STEPS = {"goto", "pick", "place", "verify", "read_board", "wait", "fetch"}
 
 
 @dataclass
@@ -806,6 +856,7 @@ class MissionRunner:
             "verify": self._do_verify,
             "read_board": self._do_read_board,
             "wait": self._do_wait,
+            "fetch": self._do_fetch,
         }
         fn = handlers.get(step.kind)
         if fn is None:
@@ -847,6 +898,9 @@ class MissionRunner:
         cls = canonical_class(params.get("class", ""))
         station = params.get("station")
         attempts = int(params.get("attempts", 3))
+        target_pose = params.get("target_pose")
+        if target_pose is not None:
+            target_pose = (float(target_pose[0]), float(target_pose[1]))
         station_pose = self.world.station_pose(station)
         verdicts: list[dict[str, Any]] = []
 
@@ -855,6 +909,7 @@ class MissionRunner:
             verdict = self.gate.pick(
                 window, cls, station_pose, self.memory,
                 time_left=self.clock.remaining(), approachable=self.approachable,
+                target_pose=target_pose,
             )
             verdicts.append({"attempt": attempt, "action": verdict.action.value,
                              "reason": verdict.reason})
@@ -864,7 +919,7 @@ class MissionRunner:
                 verdict2 = self.gate.pick(
                     second, cls, station_pose, self.memory,
                     time_left=self.clock.remaining(), approachable=self.approachable,
-                    check_memory=False,
+                    check_memory=False, target_pose=target_pose,
                 )
                 if verdict2.passed:
                     self.memory.revise_delivered(cls)
@@ -889,7 +944,7 @@ class MissionRunner:
                     continue
                 if verdict.action in (GateAction.SKIP, GateAction.REPLAN):
                     if verdict.action == GateAction.SKIP:
-                        self.memory.mark_skipped(cls)
+                        self.memory.mark_skipped(cls, pose=target_pose)
                     return (Outcome.SKIPPED, verdict.reason, attempt,
                             {"verdicts": verdicts})
                 continue
@@ -901,7 +956,10 @@ class MissionRunner:
                 # Only a confirmed grasp changes memory. A failed attempt must leave the
                 # cube pending, otherwise the retry would see "already carrying".
                 confirmed = canonical_class(result.confirmed_class or cls)
-                self.memory.mark_picked(cls, confirmed=confirmed)
+                pick_pose = getattr(result, "confirmed_pose", None)
+                if pick_pose is None and verdict.evidence:
+                    pick_pose = verdict.evidence.pose()
+                self.memory.mark_picked(cls, confirmed=confirmed, pose=pick_pose)
                 if confirmed != cls:
                     self._event("confirmed_class_mismatch", requested=cls, confirmed=confirmed)
                 return (Outcome.OK, "", attempt,
@@ -910,7 +968,7 @@ class MissionRunner:
             if not getattr(result, "retryable", True):
                 break
 
-        self.memory.mark_skipped(cls)
+        self.memory.mark_skipped(cls, pose=target_pose)
         return (Outcome.SKIPPED, "pick attempts exhausted", attempts,
                 {"verdicts": verdicts})
 
@@ -984,6 +1042,86 @@ class MissionRunner:
     def _do_wait(self, params: dict[str, Any]) -> tuple[Outcome, str, int, dict[str, Any]]:
         self._call("wait", float(params.get("seconds", 1.0)))
         return Outcome.OK, "", 1, {}
+
+    # -- fetch: adaptive station -> pick -> mapped zone ---------------------
+
+    def _best_station(self, cls: str):
+        """Nearest (pending cube, Sorting side) pair for this class."""
+        pending = [i for i in self.memory.pending(cls) if i.x is not None and i.y is not None]
+        if not pending:
+            return None
+        best = None  # (distance, instance, side)
+        for inst in pending:
+            for side in ("N", "S", "E", "W"):
+                pose = self.world.station_pose(side)
+                if pose is None:
+                    continue
+                dist = math.hypot(inst.x - pose[0], inst.y - pose[1])
+                if best is None or dist < best[0]:
+                    best = (dist, inst, side)
+        if best is None:
+            return None
+        return best[1], best[2]
+
+    def _do_fetch(self, params: dict[str, Any]) -> tuple[Outcome, str, int, dict[str, Any]]:
+        """Pick `count` cubes of a class from the best station, deliver to the board zone."""
+        cls = canonical_class(params.get("class", ""))
+        count = int(params.get("count", 1))
+        level = int(params.get("level", 1))
+        attempts = int(params.get("attempts", 2))
+        delivered = 0
+        tries = 0
+        details: list[dict[str, Any]] = []
+        max_tries = count * 2 + 2
+
+        while delivered < count and tries < max_tries:
+            choice = self._best_station(cls)
+            if choice is None:
+                details.append({"reason": "no pending cube"})
+                break
+            instance, side = choice
+            tries += 1
+
+            outcome, reason, _, detail = self._do_goto(
+                {"point": "Sorting_" + side, "tol": 0.08})
+            if outcome != Outcome.OK:
+                details.append({"side": side, "stage": "goto_station", "reason": reason})
+                continue
+
+            target_pose = ((instance.x, instance.y)
+                           if instance.x is not None and instance.y is not None else None)
+            outcome, reason, _, detail = self._do_pick(
+                {"class": cls, "station": side, "attempts": attempts,
+                 "target_pose": target_pose})
+            if outcome != Outcome.OK:
+                details.append({"side": side, "instance": instance.name,
+                                "stage": "pick", "reason": reason})
+                continue
+
+            zone = self.memory.mapping.get(cls) or self.world.default_mapping.get(cls)
+            if not zone:
+                details.append({"stage": "mapping", "reason": "no zone for %s" % cls})
+                break
+
+            point = "Collection_%s_approach" % zone
+            outcome, reason, _, detail = self._do_goto({"point": point, "tol": 0.06})
+            if outcome != Outcome.OK:
+                details.append({"zone": zone, "stage": "goto_zone", "reason": reason})
+                break  # cube is carried; stop and let the mission report it
+
+            self._do_place({"zone": zone, "level": level})
+            vout, vreason, _, _ = self._do_verify(
+                {"class": cls, "zone": zone, "timeout_s": 3.0})
+            delivered += 1
+            details.append({"side": side, "zone": zone, "instance": instance.name,
+                            "verify": vout.value, "verify_reason": vreason})
+
+        if delivered == 0:
+            return Outcome.SKIPPED, "no %s delivered" % cls, tries, {
+                "class": cls, "delivered": 0, "details": details}
+        reason = "" if delivered >= count else "delivered %d/%d" % (delivered, count)
+        return Outcome.OK, reason, tries, {
+            "class": cls, "delivered": delivered, "details": details}
 
     # -- reports ------------------------------------------------------------
 

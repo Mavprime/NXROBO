@@ -1,59 +1,82 @@
 {
-  "seed": 3,
+  "frame": "arena",
+  "arena": {
+    "size": [
+      3.0,
+      3.0
+    ],
+    "origin": [
+      0.0,
+      0.0
+    ],
+    "wall_height": 0.4,
+    "walls": true
+  },
+  "table": {
+    "center": [
+      0.165,
+      1.5
+    ],
+    "size": [
+      0.33,
+      0.4
+    ],
+    "height": 0.2
+  },
   "bricks": [
-    {
-      "name": "brick_1_1",
-      "type": "clock",
-      "row": 1,
-      "col": 1,
-      "layer": 1,
-      "x": 0.0,
-      "y": 0.0
-    },
     {
       "name": "brick_0_0",
       "type": "doll",
       "row": 0,
       "col": 0,
       "layer": 1,
-      "x": -0.14500000000000002,
-      "y": 0.14500000000000002
+      "x": 1.355,
+      "y": 1.645
     },
     {
       "name": "brick_0_1",
-      "type": "banana",
+      "type": "clock",
       "row": 0,
       "col": 1,
       "layer": 1,
-      "x": 0.0,
-      "y": 0.14500000000000002
+      "x": 1.5,
+      "y": 1.645
     },
     {
       "name": "brick_0_2",
-      "type": "doll",
+      "type": "banana",
       "row": 0,
       "col": 2,
       "layer": 1,
-      "x": 0.14500000000000002,
-      "y": 0.14500000000000002
+      "x": 1.645,
+      "y": 1.645
     },
     {
       "name": "brick_1_0",
-      "type": "doll",
+      "type": "banana",
       "row": 1,
       "col": 0,
       "layer": 1,
-      "x": -0.14500000000000002,
-      "y": 0.0
+      "x": 1.355,
+      "y": 1.5
+    },
+    {
+      "name": "brick_1_1",
+      "type": "clock",
+      "row": 1,
+      "col": 1,
+      "layer": 1,
+      "x": 1.5,
+      "y": 1.5
     },
     {
       "name": "brick_1_2",
-      "type": "banana",
+      "type": "doll",
       "row": 1,
       "col": 2,
       "layer": 1,
-      "x": 0.14500000000000002,
-      "y": 0.0
+      "x": 1.645,
+      "y": 1.5
     },
     {
       "name": "brick_2_0",
@@ -61,26 +84,26 @@
       "row": 2,
       "col": 0,
       "layer": 1,
-      "x": -0.14500000000000002,
-      "y": -0.14500000000000002
+      "x": 1.355,
+      "y": 1.355
     },
     {
       "name": "brick_2_1",
-      "type": "clock",
+      "type": "banana",
       "row": 2,
       "col": 1,
       "layer": 1,
-      "x": 0.0,
-      "y": -0.14500000000000002
+      "x": 1.5,
+      "y": 1.355
     },
     {
       "name": "brick_2_2",
-      "type": "banana",
+      "type": "doll",
       "row": 2,
       "col": 2,
       "layer": 1,
-      "x": 0.14500000000000002,
-      "y": -0.14500000000000002
+      "x": 1.645,
+      "y": 1.355
     },
     {
       "name": "cake",
@@ -88,14 +111,14 @@
       "row": 1,
       "col": 1,
       "layer": 2,
-      "x": 0.0,
-      "y": 0.0
+      "x": 1.5,
+      "y": 1.5
     }
   ],
   "board_left_to_right": [
+    "doll",
     "clock",
-    "banana",
-    "doll"
+    "banana"
   ],
   "board_zones": [
     "B",
@@ -105,103 +128,104 @@
   "zones": {
     "A": {
       "transport_center": [
-        -1.0,
-        1.0
+        0.5,
+        2.5
       ],
       "collection_center": [
-        -1.275,
-        1.275
+        0.225,
+        2.775
       ]
     },
     "B": {
       "transport_center": [
-        1.0,
-        1.0
+        2.5,
+        2.5
       ],
       "collection_center": [
-        1.275,
-        1.275
+        2.775,
+        2.775
       ]
     },
     "C": {
       "transport_center": [
-        1.0,
-        -1.0
+        2.5,
+        0.5
       ],
       "collection_center": [
-        1.275,
-        -1.275
+        2.775,
+        0.225
       ]
     },
     "D": {
       "transport_center": [
-        -1.0,
-        -1.0
+        0.5,
+        0.5
       ],
       "collection_center": [
-        -1.275,
-        -1.275
+        0.225,
+        0.225
       ]
     }
   },
-  "start_pose": {
-    "x": -1.275,
-    "y": 1.275,
-    "yaw": -1.5708
-  },
   "points": {
     "Classification_area": [
-      -0.9,
-      0.0
+      0.6,
+      1.5
     ],
     "Sorting_N": [
-      0.0,
-      0.38
-    ],
-    "Sorting_W": [
-      -0.38,
-      0.0
+      1.5,
+      1.91
     ],
     "Sorting_S": [
-      0.0,
-      -0.38
+      1.5,
+      1.09
     ],
     "Sorting_E": [
-      0.38,
-      0.0
+      1.91,
+      1.5
+    ],
+    "Sorting_W": [
+      1.09,
+      1.5
     ],
     "Collection_A": [
-      -1.275,
-      1.275
+      0.225,
+      2.775
     ],
     "Collection_A_approach": [
-      -1.0275126265847083,
-      1.0275126265847083
+      0.4725,
+      2.5275
     ],
     "Collection_B": [
-      1.275,
-      1.275
+      2.775,
+      2.775
     ],
     "Collection_B_approach": [
-      1.0275126265847083,
-      1.0275126265847083
+      2.5275,
+      2.5275
     ],
     "Collection_C": [
-      1.275,
-      -1.275
+      2.775,
+      0.225
     ],
     "Collection_C_approach": [
-      1.0275126265847083,
-      -1.0275126265847083
+      2.5275,
+      0.4725
     ],
     "Collection_D": [
-      -1.275,
-      -1.275
+      0.225,
+      0.225
     ],
     "Collection_D_approach": [
-      -1.0275126265847083,
-      -1.0275126265847083
+      0.4725,
+      0.4725
     ]
   },
-  "note": "points are approximate stand-ins; real ones come from your mapping step"
+  "start_pose": {
+    "x": 0.225,
+    "y": 2.775,
+    "yaw": -0.785398
+  },
+  "note": "generated from config/arena_map.yaml; origin at the arena SW corner",
+  "seed": 3
 }

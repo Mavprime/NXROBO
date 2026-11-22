@@ -1,0 +1,97 @@
+# Canonical arena map (2D vector/semantic layer), 0..3 m frame.
+#
+# Frame: `arena`, origin at the SOUTH-WEST corner, +x east, +y north, z = 0.
+# Layout follows the official CN rules diagram (page 15):
+#
+#   y=3  A (top-left)      B (top-right)
+#        table |  centre    |
+#   y=0  D (bottom-left)   C (bottom-right)
+#        x=0                x=3
+#
+# The classification table is on the LEFT wall, between A and D.
+# Red 0.45 m collection squares sit in the outer corner of each 1x1 m zone.
+#
+# This file is the source of truth: `make_arena.py` reads it and emits
+# `arena.world` (Gazebo) and `scenario.json` (sim/mock). Edit this, then regenerate.
+
+frame: arena
+
+arena:
+  size: [3.0, 3.0]
+  origin: [0.0, 0.0]
+  wall_height: 0.40
+  walls: true
+
+table:
+  center: [0.165, 1.50]
+  size: [0.33, 0.40]        # x (out from wall), y (along the wall)
+  height: 0.20
+
+zones:
+  A:
+    corner: [0.0, 3.0]
+    transport_center: [0.500, 2.500]
+    collection_center: [0.225, 2.775]
+    approach: [0.4725, 2.5275]
+  B:
+    corner: [3.0, 3.0]
+    transport_center: [2.500, 2.500]
+    collection_center: [2.775, 2.775]
+    approach: [2.5275, 2.5275]
+  C:
+    corner: [3.0, 0.0]
+    transport_center: [2.500, 0.500]
+    collection_center: [2.775, 0.225]
+    approach: [2.5275, 0.4725]
+  D:
+    corner: [0.0, 0.0]
+    transport_center: [0.500, 0.500]
+    collection_center: [0.225, 0.225]
+    approach: [0.4725, 0.4725]
+
+# Classification board on the table, read by a robot facing west (+x side).
+# Cards left -> right for that robot are south -> north, mapping to B, C, D.
+board:
+  center: [0.165, 1.50]
+  cards_y: [1.38, 1.50, 1.62]
+  faces: "+x"
+  zones: [B, C, D]
+
+board_left_to_right: [doll, clock, banana]
+board_zones: [B, C, D]
+
+points:
+  Classification_area: [0.600, 1.500]
+  # Sorting stand-offs are biased 3 cm outward from the cluster (0.38 -> 0.41 m
+  # from the centre) so the chassis clears the outer bricks. The cake is then
+  # ~0.41 m from the robot, ~366 mm in arm x; the grasp pipeline's approach
+  # creep closes the last ~2 cm.
+  Sorting_N: [1.500, 1.910]
+  Sorting_S: [1.500, 1.090]
+  Sorting_E: [1.910, 1.500]
+  Sorting_W: [1.090, 1.500]
+  Collection_A: [0.225, 2.775]
+  Collection_A_approach: [0.4725, 2.5275]
+  Collection_B: [2.775, 2.775]
+  Collection_B_approach: [2.5275, 2.5275]
+  Collection_C: [2.775, 0.225]
+  Collection_C_approach: [2.5275, 0.4725]
+  Collection_D: [0.225, 0.225]
+  Collection_D_approach: [0.4725, 0.4725]
+
+# 3x3 first tier at the centre (10 cm bricks, 14.5 cm pitch), cake on top of
+# the centre clock. Fixed layout for reproducible sim/field comparison.
+bricks:
+  - {name: brick_0_0, type: doll,   row: 0, col: 0, layer: 1, x: 1.355, y: 1.645}
+  - {name: brick_0_1, type: clock,  row: 0, col: 1, layer: 1, x: 1.500, y: 1.645}
+  - {name: brick_0_2, type: banana, row: 0, col: 2, layer: 1, x: 1.645, y: 1.645}
+  - {name: brick_1_0, type: banana, row: 1, col: 0, layer: 1, x: 1.355, y: 1.500}
+  - {name: brick_1_1, type: clock,  row: 1, col: 1, layer: 1, x: 1.500, y: 1.500}
+  - {name: brick_1_2, type: doll,   row: 1, col: 2, layer: 1, x: 1.645, y: 1.500}
+  - {name: brick_2_0, type: clock,  row: 2, col: 0, layer: 1, x: 1.355, y: 1.355}
+  - {name: brick_2_1, type: banana, row: 2, col: 1, layer: 1, x: 1.500, y: 1.355}
+  - {name: brick_2_2, type: doll,   row: 2, col: 2, layer: 1, x: 1.645, y: 1.355}
+  - {name: cake,      type: cake,   row: 1, col: 1, layer: 2, x: 1.500, y: 1.500}
+
+# Robot starts in the A collection square, facing the arena centre.
+start_pose: {x: 0.225, y: 2.775, yaw: -0.785398}

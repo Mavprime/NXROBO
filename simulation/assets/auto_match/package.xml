@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>auto_match</name>
+  <version>0.0.0</version>
+  <description>Navigation configs copied from the robot for the simulation (config only).</description>
+  <maintainer email="spark@localhost">spark</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>catkin</buildtool_depend>
+</package>

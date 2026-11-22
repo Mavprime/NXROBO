@@ -36,7 +36,6 @@ TYPE_COLORS = {
     "cake": (0.90, 0.30, 0.40),
 }
 ZONE_FILL = {"A": "#fff3c4", "D": "#fff3c4", "B": "#dcf2dc", "C": "#dcf2dc"}
-ARENA = 1.5
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +74,11 @@ def event_sequence(mock, scenario):
 
 
 def draw_static(ax, scenario):
-    ax.add_patch(Rectangle((-ARENA, -ARENA), 2 * ARENA, 2 * ARENA,
+    arena = scenario.get("arena") or {}
+    x0, y0 = arena.get("origin", [0.0, 0.0])
+    size = arena.get("size", [3.0, 3.0])
+    x1, y1 = x0 + size[0], y0 + size[1]
+    ax.add_patch(Rectangle((x0, y0), size[0], size[1],
                            fill=False, lw=2.0, color="black", zorder=6))
 
     for zone, info in (scenario.get("zones") or {}).items():
@@ -87,18 +90,29 @@ def draw_static(ax, scenario):
         # every collection square is the red scoring square
         ax.add_patch(Rectangle((cx - 0.225, cy - 0.225), 0.45, 0.45, facecolor="none",
                                edgecolor="#d62728", lw=1.6, zorder=2))
-        ax.text(cx, cy - 0.33, "Zone " + zone, ha="center", fontsize=8, color="#444444")
+        ax.text(tx, ty, "Zone " + zone, ha="center", va="center", fontsize=8,
+                color="#444444",
+                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.55))
 
     # sorting table on the west wall + the three board cards
-    ax.add_patch(Rectangle((-1.5, -0.20), 0.33, 0.40, facecolor="#d0d0d0",
-                           edgecolor="#666666", lw=0.8, zorder=1))
-    ax.text(-1.335, 0.26, "table", ha="center", fontsize=7)
+    table = scenario.get("table")
+    if table:
+        tx, ty = table["center"]
+        sx, sy = table["size"]
+        ax.add_patch(Rectangle((tx - sx / 2, ty - sy / 2), sx, sy,
+                               facecolor="#d0d0d0", edgecolor="#666666", lw=0.8,
+                               zorder=1))
+        ax.text(tx, ty + sy / 2 + 0.10, "table", ha="center", fontsize=7)
+    board = scenario.get("board") or {}
+    bc = board.get("center") or [(scenario.get("table") or {}).get("center", [0.165, 1.5])[0],
+                                 (scenario.get("table") or {}).get("center", [0.165, 1.5])[1]]
+    cards_y = board.get("cards_y") or [bc[1] + (i - 1) * 0.12 for i in range(3)]
     for i, ty in enumerate(scenario.get("board_left_to_right") or []):
-        y = (i - 1) * 0.12
-        ax.add_patch(Rectangle((-1.385, y - 0.05), 0.10, 0.10,
+        by = cards_y[i] if i < len(cards_y) else bc[1] + (i - 1) * 0.12
+        ax.add_patch(Rectangle((bc[0] - 0.05, by - 0.05), 0.10, 0.10,
                                facecolor=TYPE_COLORS.get(ty, (0.5, 0.5, 0.5)),
                                edgecolor="black", lw=0.6, zorder=3))
-    ax.text(-1.335, -0.30, "board L→R", ha="center", fontsize=7)
+    ax.text(bc[0], bc[1] - 0.32, "board L→R", ha="center", fontsize=7)
 
     # first-tier bricks; the cake sits on top of the centre brick
     for brick in scenario.get("bricks") or []:
@@ -111,7 +125,7 @@ def draw_static(ax, scenario):
     if cake:
         ax.scatter([cake["x"]], [cake["y"]], marker="*", s=170, color=TYPE_COLORS["cake"],
                    edgecolor="black", linewidth=0.6, zorder=4)
-        ax.text(0.0, -0.30, "cake (L2)", ha="center", fontsize=7)
+        ax.text(cake["x"], cake["y"] - 0.30, "cake (L2)", ha="center", fontsize=7)
 
     for name, (px, py) in (scenario.get("points") or {}).items():
         if name.endswith("_approach"):
@@ -128,8 +142,8 @@ def draw_static(ax, scenario):
         ax.text(sp["x"], sp["y"] - 0.16, "START", ha="center", fontsize=7,
                 color="#ff7f0e", weight="bold")
 
-    ax.set_xlim(-1.62, 1.62)
-    ax.set_ylim(-1.62, 1.62)
+    ax.set_xlim(x0 - 0.12, x1 + 0.12)
+    ax.set_ylim(y0 - 0.12, y1 + 0.12)
     ax.set_aspect("equal")
     ax.set_xlabel("x (m)")
     ax.set_ylabel("y (m)")
