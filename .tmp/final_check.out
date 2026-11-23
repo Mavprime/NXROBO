@@ -1,0 +1,10 @@
+=== DETECTOR GATE LOG ===
+[INFO] [1795345852.157545]: >> [DETECTOR] publish_conf=0.25, cake_publish_conf=0.85 (anti-glare gate)
+=== ARM STATE ===
+x: 50.0
+y: 180.0
+z: 160.0
+pump: 0
+=== LAST RUN LOG LINE ===
+{"ts": "2026-11-22T19:11:12", "result": "DONE", "target": {"mode": "floor", "is_cake": false, "class": 4, "pixel": [346.0, 294.0], "xy": [197.3, -8.3], "z_est": -110.9}, "plan": {"mode": "floor", "x": 197.3, "y": -8.3, "z_approach": 70.0, "z_touch": -58.0, "z_lift": 60.0, "class_id": 4, "pixel": [346.0, 294.0]}, "hold_seconds": 5.0}
+=== DONE ===

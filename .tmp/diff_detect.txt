@@ -1,0 +1,64 @@
+warning: in the working copy of '.tmp\bundle\auto\codes\detect_ros.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'auto\codes\detect_ros.py', LF will be replaced by CRLF the next time Git touches it
+diff --git "a/.tmp\\bundle\\auto\\codes\\detect_ros.py" "b/auto\\codes\\detect_ros.py"
+index 0f59228..8904e78 100644
+--- "a/.tmp\\bundle\\auto\\codes\\detect_ros.py"
++++ "b/auto\\codes\\detect_ros.py"
+@@ -101,6 +101,6 @@ class SparkDetect:
+                                             f"{label}: {e}")
+ 
+-    def detect(self, image):
+-        """Return de-duplicated boxes (dicts) for ``image``; highlights in place."""
++    def detect(self, image, draw=True):
++        """Return de-duplicated boxes (dicts) for ``image``; optionally draws in place."""
+         boxes = []
+         self._collect(self.model_1, "model_1", image, boxes)
+@@ -108,11 +108,12 @@ class SparkDetect:
+         kept = match_logic.dedupe_boxes(boxes, dist_px=self.dedupe_px)
+ 
+-        for box in kept:
+-            cv2.rectangle(image, (box["x1"], box["y1"]), (box["x2"], box["y2"]),
+-                          (0, 255, 0), 3)
+-            label = f'{box["name"]} {box["score"]:.2f}'
+-            cv2.putText(image, label, (box["x1"], box["y1"] - 10),
+-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+-            cv2.circle(image, (box["cx"], box["cy"]), 5, (255, 0, 0), -1)
++        if draw:
++            for box in kept:
++                cv2.rectangle(image, (box["x1"], box["y1"]), (box["x2"], box["y2"]),
++                              (0, 255, 0), 3)
++                label = f'{box["name"]} {box["score"]:.2f}'
++                cv2.putText(image, label, (box["x1"], box["y1"] - 10),
++                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
++                cv2.circle(image, (box["cx"], box["cy"]), 5, (255, 0, 0), -1)
+         return kept
+ 
+@@ -181,6 +182,7 @@ class Detector:
+         obj_array.header = data.header
+ 
++        want_debug = self.image_pub.get_num_connections() > 0
+         try:
+-            boxes = self.detector.detect(image)
++            boxes = self.detector.detect(image, draw=want_debug)
+         except Exception as e:
+             rospy.logwarn_throttle(5.0, f">> [DETECTOR] inference exception: {e}")
+@@ -224,11 +226,12 @@ class Detector:
+                           f"{published} object(s) published")
+ 
+-        img_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+-        try:
+-            image_out = self.bridge.cv2_to_imgmsg(img_bgr, "bgr8")
+-            image_out.header = data.header
+-            self.image_pub.publish(image_out)
+-        except CvBridgeError as e:
+-            rospy.logwarn_throttle(5.0, f">> [DETECTOR] debug image bridge error: {e}")
++        if want_debug:
++            img_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
++            try:
++                image_out = self.bridge.cv2_to_imgmsg(img_bgr, "bgr8")
++                image_out.header = data.header
++                self.image_pub.publish(image_out)
++            except CvBridgeError as e:
++                rospy.logwarn_throttle(5.0, f">> [DETECTOR] debug image bridge error: {e}")
+ 
+ 

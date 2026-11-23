@@ -1,0 +1,13 @@
+warning: in the working copy of '.tmp\robot_calib3d.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'auto\codes\calib3d.py', LF will be replaced by CRLF the next time Git touches it
+diff --git "a/.tmp\\robot_calib3d.py" "b/auto\\codes\\calib3d.py"
+index a496ae5..cfad192 100644
+--- "a/.tmp\\robot_calib3d.py"
++++ "b/auto\\codes\\calib3d.py"
+@@ -42,5 +42,5 @@ import rospy
+ from cv_bridge import CvBridge
+ 
+-from calib_pad import pad_pixel, grab
++from pad_detect import pad_pixel, grab
+ from runtask import ArmAction, CAM_FX, CAM_FY, CAM_CX, CAM_CY
+ 

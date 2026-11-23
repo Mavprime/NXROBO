@@ -1,0 +1,16 @@
+=== USB ===
+Bus 004 Device 004: ID 8086:0b07 Intel Corp. Intel(R) RealSense(TM) Depth Camera 435 
+=== VIDEO DEVICES ===
+crw-rw-rw-+ 1 root plugdev 81, 0 11月 22 16:53 /dev/video0
+crw-rw-rw-+ 1 root plugdev 81, 1 11月 22 16:53 /dev/video1
+crw-rw-rw-+ 1 root plugdev 81, 2 11月 22 16:53 /dev/video2
+crw-rw-rw-+ 1 root plugdev 81, 3 11月 22 16:53 /dev/video3
+crw-rw-rw-+ 1 root plugdev 81, 4 11月 22 16:53 /dev/video4
+crw-rw-rw-+ 1 root plugdev 81, 5 11月 22 16:53 /dev/video5
+=== CAMERA NODE ===
+54205 /opt/ros/noetic/lib/nodelet/nodelet manager /camera/depth/points:=/camera/depth_registered/points __name:=realsense2_camera_manager __log:=/home/spark/.ros/log/e707f796-e61c-11f1-ae2a-af9c984fae55/camera-realsense2_camera_manager-4.log
+54206 /opt/ros/noetic/lib/nodelet/nodelet load realsense2_camera/RealSenseNodeFactory realsense2_camera_manager /camera/depth/points:=/camera/depth_registered/points __name:=realsense2_camera __log:=/home/spark/.ros/log/e707f796-e61c-11f1-ae2a-af9c984fae55/camera-realsense2_camera-5.log
+54215 /opt/ros/noetic/lib/nodelet/nodelet load image_proc/rectify realsense2_camera_manager --no-bond /camera/depth/points:=/camera/depth_registered/points image_mono:=color/image_raw image_rect:=color/image_rect_color __name:=color_rectify_color __log:=/home/spark/.ros/log/e707f796-e61c-11f1-ae2a-af9c984fae55/camera-color_rectify_color-6.log
+54218 /opt/ros/noetic/lib/nodelet/nodelet load depth_image_proc/point_cloud_xyzrgb realsense2_camera_manager false /camera/depth/points:=/camera/depth_registered/points rgb/image_rect_color:=color/image_rect_color rgb/camera_info:=color/camera_info depth_registered/image_rect:=aligned_depth_to_color/image_raw depth_registered/points:=depth_registered/points __name:=points_xyzrgb_hw_registered __log:=/home/spark/.ros/log/e707f796-e61c-11f1-ae2a-af9c984fae55/camera-points_xyzrgb_hw_registered-7.log
+=== URDF CAMERA LOCATION ===
+=== DRIVER PKG ===

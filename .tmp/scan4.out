@@ -1,0 +1,14 @@
+[INFO] [1795349485.410153]: >> [VISION] items_config.yaml loaded, item ids: [3, 1, 2, 4]
+[INFO] [1795349485.419607]: >> [CALIB] matrix from /home/spark/transform_3d.dat: 1.05 px/mm at the workspace, round-trip 0.0 mm
+[INFO] [1795349485.420675]: >> [CALIB] fitted 2026-11-22T15:38:34 from 11 pose(s), leave-one-out max 0.7 px / mean 0.5 px
+[INFO] [1795349485.626550]: Setting arm motor status: True
+[INFO] [1795349485.928841]: Setting arm motor status: True
+[CONFIG] depth scale=0.386784 | cake touch z=40.0 mm | floor touch z=-55.0 mm
+[INFO] [1795349490.643003]: >> [VISION] 6 cube(s) from 4 frame(s): [[3, [467, 37, 0]], [3, [465, 103, 0]], [2, [198, 116, 0]], [4, [325, 49, 0]], [2, [325, 111, 0]], [4, [85, 427, 0]]]
+[SCAN_init] Detections (samples=5, conf>=0.04, cake_conf>=0.90, cake_site_conf>=0.60): [[3, [467, 37, 0]], [3, [465, 103, 0]], [2, [198, 116, 0]], [4, [325, 49, 0]], [2, [325, 111, 0]], [4, [85, 427, 0]]]
+[SCAN_init] 5 target(s) beyond the calibrated near field (out of arm reach): [(3, 467.0, 37.0), (3, 465.0, 103.0), (2, 198.0, 116.0), (4, 325.0, 49.0), (2, 325.0, 111.0)] -> base approach required
+[SCAN_init] Chosen target: mode=cake class=2 pixel=[325.0, 111.0] far=True
+[DECISION] (Attempt 1/4) 5) Target beyond the near field (OUT OF ARM REACH) -> base approach step, then re-scan
+[TARGET] mode=cake class=2 xy=(431.4, 21.9) far=True in_reach=False dist=432.0 z_est=None
+[SCAN-ONLY] Assessment complete; no motion command was sent.
+[COMPLETED] result=SCANNED

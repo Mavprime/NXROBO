@@ -1,0 +1,8 @@
+=== ROBOT ONLINE CHECK ===
+2026年 11月 22日 星期日 19:36:53 CST
+/detector_node
+/spark_base_server
+/swiftpro_write_node
+=== CURRENT DETECTOR PROCESS ===
+85105 python3 -u /home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/detect_ros.py _augment:=true _conf:=0.25
+=== DONE ===

@@ -57,25 +57,30 @@ The robot must operate fully autonomously inside a 3 × 3 m arena for 10 minutes
 
 ```text
 Host PC (Windows 10/11)
-  ├── START_ROBOT.bat        --> 1-click launcher: asks for the IP and opens the dashboard
-  ├── upload.ps1             --> SCP code sync + automatic background restart of runtask.py
-  ├── connect.ps1            --> Quick SSH terminal launcher
-  └── remote_spark_ops.py    --> Deep remote diagnostics over SSH (USB, processes, ROS, logs)
+  ├── run_grasp_test.bat     --> grasp/view/scan test: uploads the field code and runs it
+  ├── run_scan_only.bat      --> shortcut for run_grasp_test.bat --scan-only
+  ├── auto\launchers\START_ROBOT.bat --> 1-click launcher: asks for the IP and opens the dashboard
+  ├── auto\launchers\upload.ps1      --> SCP code sync + automatic background restart of runtask.py
+  ├── auto\launchers\connect.ps1     --> Quick SSH terminal launcher
+  └── auto\docs\remote_spark_ops.py  --> Deep remote diagnostics over SSH (USB, processes, ROS, logs)
           │
       (SSH / SCP)
           ▼
 Robot onboard NUC (Ubuntu 20.04 LTS + ROS Noetic)
-  ├── semi/dashboard.sh      --> Unified operator interface (options 1–8)
-  ├── semi/start_system.sh   --> Idempotent background bringup of every subsystem
-  ├── semi/stop_system.sh    --> Safe shutdown, pump/motor reset
-  ├── semi/keypatched2v.py   --> Smooth keyboard teleoperation (self-bootstrapping ROS env)
-  ├── semi/camera_stream.py  --> MJPEG web stream on port 8080
-  ├── semi/detect_ros.py     --> YOLO detector publishing /objects (Detection2DArray)
-  ├── semi/arm_ik.py         --> Analytical 4-DOF IK reachability check
-  ├── semi/runtask.py        --> Competition FSM (perception → grasp → navigate → drop)
-  ├── semi/test_all_systems.py --> Hardware/ROS diagnostics
-  ├── semi/view_log.py       --> Interactive log viewer
-  └── semi/tests/            --> Pure-Python unit tests for the mission logic
+  ├── ~/codes/dashboard.sh       --> Unified operator interface (options 1–8)
+  ├── ~/codes/start_system.sh    --> Idempotent background bringup of every subsystem
+  ├── ~/codes/stop_system.sh     --> Safe shutdown, pump/motor stop, bag close
+  ├── ~/codes/keypatched2v.py    --> Smooth keyboard teleoperation (self-bootstrapping ROS env)
+  ├── ~/codes/camera_stream.py   --> MJPEG web stream on port 8080
+  ├── ~/codes/detect_ros.py      --> YOLO detector publishing /objects (Detection2DArray)
+  ├── ~/codes/robot_view.py      --> Annotated camera snapshot (no motion)
+  ├── ~/codes/grasp_generic.py   --> Field grasp test: scan -> grasp -> lift -> hold -> return
+  ├── ~/codes/arm_ik.py          --> Compatibility shim over match_logic kinematics
+  ├── ~/codes/match_logic.py     --> ROS-free rules, IK, vision and scoring logic
+  ├── ~/codes/runtask.py         --> Competition FSM (perception → grasp → navigate → drop)
+  ├── ~/codes/test_all_systems.py --> Hardware/ROS diagnostics
+  ├── ~/codes/view_log.py        --> Interactive log viewer
+  └── ~/codes/tests/             --> Pure-Python unit tests for the mission logic
 ```
 
 ---
@@ -180,7 +185,7 @@ when the robot is unreachable through the dashboard.
 
 ### 1. Connect and open the dashboard
 
-Double-click **`START_ROBOT.bat`** (or run `connect.ps1`):
+Double-click **`auto\launchers\START_ROBOT.bat`** (or run `auto\launchers\connect.ps1`):
 
 1. It shows the last saved IP (stored in `robot_ip.txt`, git-ignored).
 2. Press `Enter` to accept it or type the robot's new Wi-Fi IP.
@@ -191,11 +196,24 @@ If any subsystem is not running, it is started automatically in the background.
 ### 2. Sync code to the robot
 
 ```powershell
-.\upload.ps1
+.\auto\launchers\upload.ps1
 ```
 
-Copies the current `codes/` to `~/semi/` on the robot and restarts the background
-`runtask.py`.
+Copies the current `auto\codes\` files to `~/codes/` and the ROS nodes on the robot
+(`~/spark_noetic/.../auto_match/nodes/`), then restarts the background `runtask.py`.
+
+### 3. Field grasp test (optional)
+
+```powershell
+.\run_grasp_test.bat              # full grasp cycle: scan -> pick -> lift -> hold -> return
+.\run_grasp_test.bat --view       # annotated camera snapshot, no grasp motion
+.\run_scan_only.bat               # text-only target assessment, no motion
+```
+
+The launcher uploads the field-test files itself and works from the repo root or from
+`auto\` (it resolves the repository root). It deliberately does **not** overwrite
+`~/transform_3d.dat`, so a calibration fitted on the robot survives a code deploy; use
+`auto\launchers\upload.ps1 -PushCalib` when you really mean to push the repo matrix.
 
 ### 3. Start the competition mission
 
@@ -237,7 +255,7 @@ python3 -m unittest discover -s tests -p "test_*.py"
 From the dashboard choose `7`, or on the robot:
 
 ```bash
-bash ~/semi/test_all_systems.sh
+bash ~/codes/test_all_systems.sh
 ```
 
 Checks: factory calibration files (`thefile.txt`, `thefile2.txt`), every required
@@ -247,7 +265,7 @@ ports (`/dev/ttyACM*`, `/dev/ttyUSB*`), the web stream on :8080 and required ROS
 ### Deep remote diagnostics
 
 ```powershell
-python remote_spark_ops.py
+python auto\docs\remote_spark_ops.py
 ```
 
 ---
@@ -256,33 +274,33 @@ python remote_spark_ops.py
 
 ```text
 .
-├── START_ROBOT.bat            # Windows 1-click launcher
-├── upload.ps1                 # SCP sync + remote runtask restart
-├── connect.ps1                # SSH terminal launcher
-├── remote_spark_ops.py        # Remote diagnostics over SSH
+├── run_grasp_test.bat         # Field grasp/view/scan test (canonical launcher)
+├── run_scan_only.bat          # Shortcut for run_grasp_test.bat --scan-only
 ├── README.md                  # This file
-├── PLAN.md                    # Roadmap, verified phases, issue register
-├── CONTEX.md                  # Hardware parameters, topics, verified status
-├── robot_startup.md           # Operator pre-match checklist
-├── semi/                      # Semi-autonomous teleoperation and arm scripts
-├── auto/                      # Self-contained verified release bundle
-│   ├── codes/                 # Production code executed on the robot
-│   ├── launchers/             # Launchers shipped with the release
-│   └── README.md              # Deployment notes for the release
-└── spark_humble_ws/
-    ├── codes/                 # Main development source tree
-    │   ├── runtask.py         # Competition FSM
-    │   ├── detect_ros.py      # YOLO detector node
-    │   ├── camera_stream.py   # MJPEG stream server
-    │   ├── dashboard.sh       # Operator dashboard
-    │   ├── start_system.sh    # Idempotent bringup
-    │   ├── stop_system.sh     # Safe shutdown
-    │   ├── arm_ik.py          # IK reachability
-    │   ├── test_all_systems.* # Hardware diagnostics
-    │   ├── view_log.py        # Live log viewer
-    │   └── tests/             # Unit test suite
-    ├── Manuals/               # Organiser documentation
-    └── ...                    # Competition materials and vendor tools
+├── auto/
+│   ├── codes/                 # Production code deployed to the robot
+│   │   ├── match_logic.py     # ROS-free rules, IK, vision and scoring logic
+│   │   ├── runtask.py         # Competition FSM
+│   │   ├── detect_ros.py      # YOLO detector node (dual model -> /objects)
+│   │   ├── grasp_generic.py   # Field grasp test (scan -> pick -> lift -> return)
+│   │   ├── robot_view.py      # Annotated camera snapshot (no motion)
+│   │   ├── calib3d.py         # Hand-eye calibration -> ~/transform_3d.dat
+│   │   ├── pad_detect.py      # Suction-pad blob detector
+│   │   ├── arm_ik.py          # Compatibility shim over match_logic
+│   │   ├── dashboard.sh       # Operator dashboard
+│   │   ├── start_system.sh    # Idempotent bringup
+│   │   ├── stop_system.sh     # Safe shutdown
+│   │   ├── camera_stream.py   # MJPEG stream server
+│   │   ├── test_all_systems.py# Hardware diagnostics
+│   │   ├── view_log.py        # Live log viewer
+│   │   ├── transform_3d.dat   # Shipped hand-eye matrix (numpy 4x3)
+│   │   └── tests/             # Unit test suite (157 tests)
+│   ├── launchers/             # START_ROBOT.bat, connect.ps1, upload.ps1, robot_ip.txt
+│   └── docs/                  # Handoff, operator docs, remote diagnostics
+├── semi/                      # Legacy teleoperation/diagnostics (not deployed)
+├── simulation/                # Chassis simulator track
+├── Manuals/                   # Organiser documentation
+└── snapshots/                 # Downloaded view images (git-ignored)
 ```
 
 ---
@@ -293,6 +311,18 @@ python remote_spark_ops.py
 * `thefile2.txt` — camera→arm coefficients for the **2nd tier** (Z = 45 mm).
 * Both files are factory-calibrated and stored in the robot's home directory; the
   diagnostics script verifies they exist and contain four coefficients.
+* `~/transform_3d.dat` — the hand-eye matrix fitted by `calib3d.py` (numpy 4×3). It is
+  loaded by `runtask.py` / `grasp_generic.py`; on startup the code sanity-checks it
+  (`check_transform`) and compares its MD5 with `~/transform_3d.meta.json`.
+* `~/transform_3d.meta.json` — sidecar written by `calib3d.py`: fit date, poses,
+  leave-one-out residuals, intrinsics, the matrix MD5 and one reference pad pixel.
+  A mismatch between the MD5 in the sidecar and the matrix on disk means the matrix
+  was replaced after that fit (usually by a deploy that pushed an older matrix): the
+  sidecar check frame is then ignored and the FSM performs an active pad check before
+  it will run. Re-run `python3 -u ~/codes/calib3d.py` to fit a fresh, consistent pair.
+* The `run_grasp_test.bat` launcher and `upload.ps1` do **not** overwrite
+  `~/transform_3d.dat` (only `upload.ps1 -PushCalib` does), so a matrix fitted on the
+  robot is never silently replaced by the one in the repository.
 * Waypoint names come from the robot's saved map; edit `runtask.py` if your arena
   uses different location names.
 * The robot IP is stored locally in `robot_ip.txt` and is **git-ignored**; it is not

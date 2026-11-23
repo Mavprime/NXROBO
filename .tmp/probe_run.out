@@ -1,0 +1,76 @@
+=== NODES ===
+/detector_node
+/spark_base_server
+/swiftpro_read_node
+/swiftpro_rviz_node
+/swiftpro_write_node
+=== OLD DETECTOR: raw /objects confidence distribution (6 s) ===
+frames collected: classes=[1, 2, 3, 4, 10, 20, 30]
+class=1 n=51 min=0.904 max=0.934
+class=2 n=52 min=0.035 max=0.844
+  cake_candidate score=0.844 px=(186,38)
+  cake_candidate score=0.844 px=(186,37)
+  cake_candidate score=0.820 px=(186,38)
+  cake_candidate score=0.819 px=(187,37)
+  cake_candidate score=0.808 px=(186,37)
+  cake_candidate score=0.804 px=(186,37)
+  cake_candidate score=0.802 px=(186,37)
+  cake_candidate score=0.799 px=(349,286)
+  cake_candidate score=0.791 px=(186,37)
+  cake_candidate score=0.790 px=(185,37)
+  cake_candidate score=0.775 px=(186,38)
+  cake_candidate score=0.775 px=(186,37)
+  cake_candidate score=0.753 px=(187,37)
+  cake_candidate score=0.749 px=(187,36)
+  cake_candidate score=0.747 px=(186,37)
+  cake_candidate score=0.741 px=(348,286)
+  cake_candidate score=0.739 px=(185,37)
+  cake_candidate score=0.738 px=(187,37)
+  cake_candidate score=0.722 px=(349,286)
+  cake_candidate score=0.696 px=(186,37)
+  cake_candidate score=0.665 px=(348,286)
+  cake_candidate score=0.611 px=(172,295)
+  cake_candidate score=0.582 px=(348,286)
+  cake_candidate score=0.569 px=(349,287)
+  cake_candidate score=0.552 px=(348,286)
+class=3 n=51 min=0.899 max=0.959
+class=4 n=67 min=0.261 max=0.813
+class=10 n=37 min=0.285 max=0.880
+class=20 n=29 min=0.036 max=0.337
+class=30 n=51 min=0.363 max=0.921
+class=1 top score=0.934 px=(488,138)
+class=1 top score=0.933 px=(487,139)
+class=1 top score=0.931 px=(488,138)
+class=1 top score=0.931 px=(184,154)
+class=1 top score=0.930 px=(488,138)
+class=2 top score=0.844 px=(186,38)
+class=2 top score=0.844 px=(186,37)
+class=2 top score=0.820 px=(186,38)
+class=2 top score=0.819 px=(187,37)
+class=2 top score=0.808 px=(186,37)
+class=3 top score=0.959 px=(514,284)
+class=3 top score=0.958 px=(513,284)
+class=3 top score=0.958 px=(512,284)
+class=3 top score=0.957 px=(512,284)
+class=3 top score=0.953 px=(512,285)
+class=4 top score=0.813 px=(189,43)
+class=4 top score=0.811 px=(189,43)
+class=4 top score=0.805 px=(189,43)
+class=4 top score=0.803 px=(189,43)
+class=4 top score=0.802 px=(189,43)
+class=10 top score=0.880 px=(185,221)
+class=10 top score=0.873 px=(185,221)
+class=10 top score=0.872 px=(185,221)
+class=10 top score=0.863 px=(186,221)
+class=10 top score=0.848 px=(185,221)
+class=20 top score=0.337 px=(191,362)
+class=20 top score=0.320 px=(189,362)
+class=20 top score=0.307 px=(189,361)
+class=20 top score=0.287 px=(189,360)
+class=20 top score=0.245 px=(191,362)
+class=30 top score=0.921 px=(443,297)
+class=30 top score=0.918 px=(444,297)
+class=30 top score=0.916 px=(443,296)
+class=30 top score=0.914 px=(444,298)
+class=30 top score=0.912 px=(444,298)
+=== DONE ===

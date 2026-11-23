@@ -1,0 +1,36 @@
+=== SCAN-ONLY (no motion) START 19:10:45 ===
+[0;36m[1m
+==========================================================
+      SPARK ROBOT - CUBE GRASP PREPARATION & TEST       
+==========================================================
+[0m
+Already patched or pattern not found in: /home/spark/spark_noetic/src/spark_driver/arm/uArm/swiftpro/src/swiftpro_write_node.cpp
+Already patched or pattern not found in: /home/spark/spark_noetic/src/spark_driver/arm/uArm/swiftpro/src/swiftpro_read_node.cpp
+[1/4] Checking base chassis and camera...
+      [0;32m[OK] Base chassis and camera active.[0m
+[2/4] Checking uArm manipulator driver...
+      [0;32m[OK] uArm manipulator active.[0m
+[3/4] Checking neural network cube detector (/detector_node)...
+      [1;33mLaunching neural network cube detector...[0m
+      Waiting for neural network weights initialization...
+      [0;32m[OK] Cube detector active and publishing to /objects.[0m
+[4/4] [0;36m[1mAll drivers ready. Starting grasp logic...[0m
+==========================================================
+
+[INFO] [1795345855.352312]: >> [VISION] items_config.yaml loaded, item ids: [3, 1, 2, 4]
+[INFO] [1795345855.359264]: >> [CALIB] matrix from /home/spark/transform_3d.dat: 1.05 px/mm at the workspace, round-trip 0.0 mm
+[INFO] [1795345855.360925]: >> [CALIB] fitted 2026-11-22T15:38:34 from 11 pose(s), leave-one-out max 0.7 px / mean 0.5 px
+[INFO] [1795345855.566565]: Setting arm motor status: True
+[INFO] [1795345855.868293]: Setting arm motor status: True
+[CONFIG] depth scale=0.386784 | cake touch z=40.0 mm | floor touch z=-55.0 mm
+[INFO] [1795345860.580544]: >> [VISION] 15 cube(s) from 4 frame(s): [[3, [513, 284, 0]], [1, [487, 139, 0]], [1, [184, 154, 0]], [1, [468, 31, 0]], [3, [337, 147, 0]], [3, [333, 35, 0]], [3, [444, 297, 0]], [3, [334, 213, 0]], [1, [185, 220, 0]], [4, [189, 43, 0]], [4, [178, 299, 0]], [4, [346, 292, 0]], [1, [485, 208, 0]], [3, [334, 87, 0]], [4, [66, 195, 0]]]
+[SCAN_init] Detections (samples=5, conf>=0.04, cake_conf>=0.85): [[3, [513, 284, 0]], [1, [487, 139, 0]], [1, [184, 154, 0]], [1, [468, 31, 0]], [3, [337, 147, 0]], [3, [333, 35, 0]], [3, [444, 297, 0]], [3, [334, 213, 0]], [1, [185, 220, 0]], [4, [189, 43, 0]], [4, [178, 299, 0]], [4, [346, 292, 0]], [1, [485, 208, 0]], [3, [334, 87, 0]], [4, [66, 195, 0]]]
+[DECISION] (Attempt 1/3) 3) Standard cube IN REACH -> pick immediately without base motion
+[TARGET] mode=floor class=4 xy=(198.9, -8.4) in_reach=True dist=199.1 z_est=-110.2
+[SCAN-ONLY] Assessment complete; no motion command was sent.
+[COMPLETED] result=SCANNED
+
+==========================================================
+[0;32m[1m[OK] Test completed successfully.[0m
+==========================================================
+=== SCAN-ONLY EXIT CODE: 0 ===

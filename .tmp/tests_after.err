@@ -1,0 +1,168 @@
+test_list_and_array_agree (test_calibration_guard.TestInverseAcceptsLists.test_list_and_array_agree) ... ok
+test_round_trip_returns_the_pose (test_calibration_guard.TestInverseAcceptsLists.test_round_trip_returns_the_pose) ... ok
+test_camera_shift_is_detected (test_calibration_guard.TestPadCheck.test_camera_shift_is_detected) ... ok
+test_perfect_observation_has_zero_error (test_calibration_guard.TestPadCheck.test_perfect_observation_has_zero_error) ... ok
+test_point_behind_the_camera_has_no_projection (test_calibration_guard.TestPadCheck.test_point_behind_the_camera_has_no_projection) ... ok
+test_all_zero_matrix_is_rejected (test_calibration_guard.TestTransformSanity.test_all_zero_matrix_is_rejected) ... ok
+test_non_finite_values_are_rejected (test_calibration_guard.TestTransformSanity.test_non_finite_values_are_rejected) ... ok
+test_shipped_matrix_passes (test_calibration_guard.TestTransformSanity.test_shipped_matrix_passes) ... ok
+test_uniform_scale_does_not_change_the_projection (test_calibration_guard.TestTransformSanity.test_uniform_scale_does_not_change_the_projection)
+The DLT is defined up to scale; a scaled copy must still pass. ... ok
+test_workspace_outside_the_image_is_rejected (test_calibration_guard.TestTransformSanity.test_workspace_outside_the_image_is_rejected) ... ok
+test_wrong_shape_is_rejected (test_calibration_guard.TestTransformSanity.test_wrong_shape_is_rejected) ... ok
+test_alias_keys_are_present (test_fsm_transitions.TestClassificationBoard.test_alias_keys_are_present) ... ok
+test_board_is_confident (test_fsm_transitions.TestClassificationBoard.test_board_is_confident) ... ok
+test_cake_is_never_taken_from_the_board (test_fsm_transitions.TestClassificationBoard.test_cake_is_never_taken_from_the_board)
+The board has three cards only; a cake reading must not steal a zone. ... ok
+test_duplicate_or_corrupt_board_falls_back (test_fsm_transitions.TestClassificationBoard.test_duplicate_or_corrupt_board_falls_back)
+SI-14: a broken board must never leave the mission without a mapping. ... ok
+test_permutation (test_fsm_transitions.TestClassificationBoard.test_permutation) ... ok
+test_standard_board (test_fsm_transitions.TestClassificationBoard.test_standard_board) ... ok
+test_yolo_aliases (test_fsm_transitions.TestClassificationBoard.test_yolo_aliases)
+Board read as [30, 40, 1] must normalise before it is applied. ... ok
+test_cake_goes_to_zone_a (test_fsm_transitions.TestDropPlanning.test_cake_goes_to_zone_a) ... ok
+test_every_zone_full_returns_none (test_fsm_transitions.TestDropPlanning.test_every_zone_full_returns_none) ... ok
+test_full_zone_is_refused (test_fsm_transitions.TestDropPlanning.test_full_zone_is_refused)
+A 4th cube must never be dropped at the 3rd tier height into thin air. ... ok
+test_full_zone_spills_to_a_free_one (test_fsm_transitions.TestDropPlanning.test_full_zone_spills_to_a_free_one) ... ok
+test_tier_dispatch (test_fsm_transitions.TestDropPlanning.test_tier_dispatch) ... ok
+test_zone_comes_from_the_board_mapping (test_fsm_transitions.TestDropPlanning.test_zone_comes_from_the_board_mapping) ... ok
+test_empty_station_is_retired_instead_of_looping (test_fsm_transitions.TestLaunchSequence.test_empty_station_is_retired_instead_of_looping) ... ok
+test_plan_is_bounded_by_the_cube_count (test_fsm_transitions.TestLaunchSequence.test_plan_is_bounded_by_the_cube_count) ... ok
+test_all_retired_returns_none (test_fsm_transitions.TestStationRouting.test_all_retired_returns_none) ... ok
+test_approach_waypoints (test_fsm_transitions.TestStationRouting.test_approach_waypoints) ... ok
+test_exit_manoeuvres (test_fsm_transitions.TestStationRouting.test_exit_manoeuvres) ... ok
+test_no_preference_falls_back_to_the_first_station (test_fsm_transitions.TestStationRouting.test_no_preference_falls_back_to_the_first_station) ... ok
+test_preference_skips_a_retired_station (test_fsm_transitions.TestStationRouting.test_preference_skips_a_retired_station) ... ok
+test_preferred_station_for_each_zone (test_fsm_transitions.TestStationRouting.test_preferred_station_for_each_zone) ... ok
+test_retire_station_removes_it_once (test_fsm_transitions.TestStationRouting.test_retire_station_removes_it_once) ... ok
+test_cake_tier2_reachability_and_approximation (test_ik_reachability.TestArmIKReachability.test_cake_tier2_reachability_and_approximation)
+Tier 2 cake grasp reaches over front row (x up to 350 mm, z=40 mm). ... ok
+test_degenerate_inputs_do_not_crash (test_ik_reachability.TestArmIKReachability.test_degenerate_inputs_do_not_crash) ... ok
+test_operational_poses_are_reachable (test_ik_reachability.TestArmIKReachability.test_operational_poses_are_reachable) ... ok
+test_out_of_bounds_poses_are_rejected (test_ik_reachability.TestArmIKReachability.test_out_of_bounds_poses_are_rejected) ... ok
+test_pixel_reachable_checks_every_height (test_ik_reachability.TestArmIKReachability.test_pixel_reachable_checks_every_height) ... ok
+test_pixel_to_arm_mapping (test_ik_reachability.TestArmIKReachability.test_pixel_to_arm_mapping) ... ok
+test_constants_match (test_ik_reachability.TestSingleSourceOfKinematics.test_constants_match) ... ok
+test_shim_reexports_the_same_function_objects (test_ik_reachability.TestSingleSourceOfKinematics.test_shim_reexports_the_same_function_objects) ... ok
+test_default_budget_leaves_room_in_a_ten_minute_match (test_match_clock.TestMatchClock.test_default_budget_leaves_room_in_a_ten_minute_match) ... ok
+test_elapsed_and_remaining_follow_time (test_match_clock.TestMatchClock.test_elapsed_and_remaining_follow_time) ... ok
+test_elapsed_is_zero_before_start (test_match_clock.TestMatchClock.test_elapsed_is_zero_before_start) ... ok
+test_elapsed_never_goes_negative (test_match_clock.TestMatchClock.test_elapsed_never_goes_negative) ... ok
+test_expiry_is_exact_at_the_limit (test_match_clock.TestMatchClock.test_expiry_is_exact_at_the_limit) ... ok
+test_start_returns_self_and_resets_elapsed (test_match_clock.TestMatchClock.test_start_returns_self_and_resets_elapsed) ... ok
+test_warning_window (test_match_clock.TestMatchClock.test_warning_window) ... ok
+test_empty_and_unknown_payloads_are_ignored (test_match_clock.TestOperatorCommands.test_empty_and_unknown_payloads_are_ignored)
+The old code started the mission on ANY message, including 'stop'. ... ok
+test_start_payloads (test_match_clock.TestOperatorCommands.test_start_payloads) ... ok
+test_stop_is_never_treated_as_start (test_match_clock.TestOperatorCommands.test_stop_is_never_treated_as_start) ... ok
+test_stop_payloads (test_match_clock.TestOperatorCommands.test_stop_payloads) ... ok
+test_banana_aliases (test_normalizer.TestClassNormalizer.test_banana_aliases) ... ok
+test_canonical_ids (test_normalizer.TestClassNormalizer.test_canonical_ids) ... ok
+test_clock_aliases (test_normalizer.TestClassNormalizer.test_clock_aliases) ... ok
+test_is_cake (test_normalizer.TestClassNormalizer.test_is_cake) ... ok
+test_production_map_is_the_one_under_test (test_normalizer.TestClassNormalizer.test_production_map_is_the_one_under_test)
+Guard: this test must read the deployed mapping, not a local copy. ... ok
+test_site_aliases (test_normalizer.TestClassNormalizer.test_site_aliases)
+Each printed <item>_site face maps to its own item. ... ok
+test_string_inputs (test_normalizer.TestClassNormalizer.test_string_inputs) ... ok
+test_unknown_and_noise_ids (test_normalizer.TestClassNormalizer.test_unknown_and_noise_ids) ... ok
+test_degenerate_matrix_returns_none (test_scan_and_approach.TestFarFieldTarget.test_degenerate_matrix_returns_none) ... ok
+test_far_cake_keeps_its_distance_for_the_approach (test_scan_and_approach.TestFarFieldTarget.test_far_cake_keeps_its_distance_for_the_approach)
+The reach clamp must NOT turn a distant Cake into a "reachable" one. ... ok
+test_far_cake_target_xy_is_unclamped (test_scan_and_approach.TestFarFieldTarget.test_far_cake_target_xy_is_unclamped) ... ok
+test_far_flag_forces_a_base_approach (test_scan_and_approach.TestFarFieldTarget.test_far_flag_forces_a_base_approach) ... ok
+test_far_floor_pixel_is_a_valid_approach_point (test_scan_and_approach.TestFarFieldTarget.test_far_floor_pixel_is_a_valid_approach_point) ... ok
+test_near_floor_pixel_stays_graspable (test_scan_and_approach.TestFarFieldTarget.test_near_floor_pixel_stays_graspable) ... ok
+test_old_hard_crop_is_gone (test_scan_and_approach.TestGraspGenericWiring.test_old_hard_crop_is_gone) ... ok
+test_passes_the_far_flag_into_the_reach_decision (test_scan_and_approach.TestGraspGenericWiring.test_passes_the_far_flag_into_the_reach_decision) ... ok
+test_reach_state_and_geometry_come_from_match_logic (test_scan_and_approach.TestGraspGenericWiring.test_reach_state_and_geometry_come_from_match_logic) ... ok
+test_reports_out_of_reach_instead_of_no_target (test_scan_and_approach.TestGraspGenericWiring.test_reports_out_of_reach_instead_of_no_target) ... ok
+test_uses_the_far_field_coordinates (test_scan_and_approach.TestGraspGenericWiring.test_uses_the_far_field_coordinates) ... ok
+test_uses_the_scan_window_helpers (test_scan_and_approach.TestGraspGenericWiring.test_uses_the_scan_window_helpers) ... ok
+test_a_low_cake_estimate_falls_back_to_floor_heights (test_scan_and_approach.TestGraspHeights.test_a_low_cake_estimate_falls_back_to_floor_heights) ... ok
+test_approach_distance_targets (test_scan_and_approach.TestGraspHeights.test_approach_distance_targets) ... ok
+test_cake_heights_use_the_calibrated_touch_height (test_scan_and_approach.TestGraspHeights.test_cake_heights_use_the_calibrated_touch_height) ... ok
+test_floor_heights (test_scan_and_approach.TestGraspHeights.test_floor_heights) ... ok
+test_image_edges_are_still_rejected (test_scan_and_approach.TestScanWindow.test_image_edges_are_still_rejected) ... ok
+test_recorded_far_cube_passes_the_scan_window (test_scan_and_approach.TestScanWindow.test_recorded_far_cube_passes_the_scan_window) ... ok
+test_recorded_near_cube_is_in_the_near_field (test_scan_and_approach.TestScanWindow.test_recorded_near_cube_is_in_the_near_field) ... ok
+test_the_window_contains_the_whole_near_field (test_scan_and_approach.TestScanWindow.test_the_window_contains_the_whole_near_field)
+Every calibrated near-field pixel must also pass the loose window. ... ok
+test_the_window_is_a_strict_superset_of_the_near_field (test_scan_and_approach.TestScanWindow.test_the_window_is_a_strict_superset_of_the_near_field) ... ok
+test_cake_in_zone_a (test_scoring_rules.TestScoreEstimate.test_cake_in_zone_a) ... ok
+test_does_not_count_more_than_three_tiers (test_scoring_rules.TestScoreEstimate.test_does_not_count_more_than_three_tiers) ... ok
+test_empty_match_scores_only_the_start (test_scoring_rules.TestScoreEstimate.test_empty_match_scores_only_the_start) ... ok
+test_full_towers (test_scoring_rules.TestScoreEstimate.test_full_towers)
+Cake first in A, then 3 tiers in each of B, C, D. ... ok
+test_cake_first_delivery_to_zone_a (test_scoring_rules.TestScoringMatrix.test_cake_first_delivery_to_zone_a) ... ok
+test_illegal_first_cube_scores_zero (test_scoring_rules.TestScoringMatrix.test_illegal_first_cube_scores_zero) ... ok
+test_invalid_tier_raises (test_scoring_rules.TestScoringMatrix.test_invalid_tier_raises) ... ok
+test_red_zone_tier_points (test_scoring_rules.TestScoringMatrix.test_red_zone_tier_points)
+Red 0.45 x 0.45 m square: N + 2^(N-1). ... ok
+test_standard_zone_tier_points (test_scoring_rules.TestScoringMatrix.test_standard_zone_tier_points)
+Standard transport zone: 2^(N-1). ... ok
+test_theoretical_maximum (test_scoring_rules.TestScoringMatrix.test_theoretical_maximum)
+1 + 2 (cake in A) + 3 zones x (2 + 4 + 7) = 42. ... ok
+test_cake_id2_gate_is_configurable (test_voting_and_clustering.TestCakeAntiGlareGate.test_cake_id2_gate_is_configurable) ... ok
+test_cake_site_gate_is_configurable (test_voting_and_clustering.TestCakeAntiGlareGate.test_cake_site_gate_is_configurable) ... ok
+test_false_cake_site_is_rejected (test_voting_and_clustering.TestCakeAntiGlareGate.test_false_cake_site_is_rejected)
+Measured false cake_site (clock face) goes up to 0.527. ... ok
+test_high_confidence_cake_id2_is_kept (test_voting_and_clustering.TestCakeAntiGlareGate.test_high_confidence_cake_id2_is_kept) ... ok
+test_live_glare_score_is_rejected (test_voting_and_clustering.TestCakeAntiGlareGate.test_live_glare_score_is_rejected)
+Live field data: false cake(id 2) on a banana cube reached 0.852. ... ok
+test_low_confidence_cake_does_not_relabel_a_real_cube (test_voting_and_clustering.TestCakeAntiGlareGate.test_low_confidence_cake_does_not_relabel_a_real_cube)
+A false cake on top of a teddy must not force the class to Cake. ... ok
+test_measured_thresholds (test_voting_and_clustering.TestCakeAntiGlareGate.test_measured_thresholds)
+Guards against silently lowering the gates below the measured noise. ... ok
+test_persistent_low_confidence_cake_is_rejected (test_voting_and_clustering.TestCakeAntiGlareGate.test_persistent_low_confidence_cake_is_rejected) ... ok
+test_real_cake_site_is_kept (test_voting_and_clustering.TestCakeAntiGlareGate.test_real_cake_site_is_kept)
+Measured real-cake cake_site scores pass the 0.60 gate. ... ok
+test_different_classes_at_one_place_survive (test_voting_and_clustering.TestCrossModelDedupe.test_different_classes_at_one_place_survive)
+Two genuinely different classes must not be merged by position. ... ok
+test_same_class_close_keeps_best_score (test_voting_and_clustering.TestCrossModelDedupe.test_same_class_close_keeps_best_score) ... ok
+test_same_class_far_apart_survive (test_voting_and_clustering.TestCrossModelDedupe.test_same_class_far_apart_survive) ... ok
+test_threshold_is_configurable (test_voting_and_clustering.TestCrossModelDedupe.test_threshold_is_configurable) ... ok
+test_empty_input (test_voting_and_clustering.TestGraspCandidateSelection.test_empty_input) ... ok
+test_falls_back_when_preferred_id_is_gone (test_voting_and_clustering.TestGraspCandidateSelection.test_falls_back_when_preferred_id_is_gone) ... ok
+test_preferred_id_survives_a_class_flip (test_voting_and_clustering.TestGraspCandidateSelection.test_preferred_id_survives_a_class_flip)
+After a re-scan the original class must win over a closer stranger. ... ok
+test_prefers_object_ahead_of_the_robot (test_voting_and_clustering.TestGraspCandidateSelection.test_prefers_object_ahead_of_the_robot) ... ok
+test_cross_model_duplicate_in_one_frame_merges (test_voting_and_clustering.TestTemporalVotingAndClustering.test_cross_model_duplicate_in_one_frame_merges)
+The detector runs two YOLO models: the same cube must appear once. ... ok
+test_empty_frames_produce_nothing (test_voting_and_clustering.TestTemporalVotingAndClustering.test_empty_frames_produce_nothing) ... ok
+test_low_confidence_detections_filtered (test_voting_and_clustering.TestTemporalVotingAndClustering.test_low_confidence_detections_filtered) ... ok
+test_min_hits_scales_with_window (test_voting_and_clustering.TestTemporalVotingAndClustering.test_min_hits_scales_with_window)
+2 frames, cube in both -> accepted; 1 of 4 -> rejected. ... ok
+test_single_frame_mode_still_works (test_voting_and_clustering.TestTemporalVotingAndClustering.test_single_frame_mode_still_works)
+A one-frame window (num_samples=1) keeps the old behaviour. ... ok
+test_single_object_with_jitter_and_class_noise (test_voting_and_clustering.TestTemporalVotingAndClustering.test_single_object_with_jitter_and_class_noise)
+One cube, +-5 px jitter and 2/10 misclassified frames -> one cluster. ... ok
+test_transient_ghost_detection_rejected (test_voting_and_clustering.TestTemporalVotingAndClustering.test_transient_ghost_detection_rejected)
+A cube seen in a single frame out of ten must not survive. ... ok
+test_two_distinct_spatial_objects (test_voting_and_clustering.TestTemporalVotingAndClustering.test_two_distinct_spatial_objects)
+Two cubes 300 px apart stay separate. ... ok
+test_augmentation_is_not_forced_on (test_wiring.TestDetectorWiring.test_augmentation_is_not_forced_on) ... ok
+test_deduplicates_the_two_models (test_wiring.TestDetectorWiring.test_deduplicates_the_two_models) ... ok
+test_publishes_objects_topic (test_wiring.TestDetectorWiring.test_publishes_objects_topic) ... ok
+test_imports_match_logic (test_wiring.TestRuntaskUsesMatchLogic.test_imports_match_logic) ... ok
+test_no_infinite_empty_station_loop (test_wiring.TestRuntaskUsesMatchLogic.test_no_infinite_empty_station_loop)
+The old body retired a station with `continue` and spun forever. ... ok
+test_no_private_copy_of_ik_or_normalizer (test_wiring.TestRuntaskUsesMatchLogic.test_no_private_copy_of_ik_or_normalizer) ... ok
+test_run_task_is_defined (test_wiring.TestRuntaskUsesMatchLogic.test_run_task_is_defined) ... ok
+test_uses_the_board_decoder (test_wiring.TestRuntaskUsesMatchLogic.test_uses_the_board_decoder) ... ok
+test_uses_the_calibration_guard (test_wiring.TestRuntaskUsesMatchLogic.test_uses_the_calibration_guard)
+A stale hand-eye matrix must be caught at startup, not in the log. ... ok
+test_uses_the_match_clock (test_wiring.TestRuntaskUsesMatchLogic.test_uses_the_match_clock) ... ok
+test_uses_the_payload_parser (test_wiring.TestRuntaskUsesMatchLogic.test_uses_the_payload_parser) ... ok
+test_uses_the_voting_and_clustering_helper (test_wiring.TestRuntaskUsesMatchLogic.test_uses_the_voting_and_clustering_helper) ... ok
+test_uses_the_zone_and_tier_planners (test_wiring.TestRuntaskUsesMatchLogic.test_uses_the_zone_and_tier_planners) ... ok
+test_start_system_checks_navigation (test_wiring.TestStartupScripts.test_start_system_checks_navigation) ... ok
+test_start_system_records_a_bag (test_wiring.TestStartupScripts.test_start_system_records_a_bag) ... ok
+test_stop_system_closes_the_bag (test_wiring.TestStartupScripts.test_stop_system_closes_the_bag) ... ok
+test_no_test_file_shadows_production_logic (test_wiring.TestTestsDoNotReimplementProductionLogic.test_no_test_file_shadows_production_logic) ... ok
+
+----------------------------------------------------------------------
+Ran 133 tests in 1.266s
+
+OK

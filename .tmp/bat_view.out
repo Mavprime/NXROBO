@@ -1,0 +1,16 @@
+======================================================================
+          AUTONOMOUS CUBE GRASP TEST (SPARK ROBOT)
+======================================================================
+
+[1/3] Checking connection to robot (10.24.170.0)...
+
+======================================================================
+[NETWORK ERROR] Robot 10.24.170.0 is not responding to ping!
+
+Please check:
+  1. Robot is powered on.
+  2. PC is connected to robot network (Wi-Fi 10.24.170.x or cable).
+======================================================================
+
+Press any key to continue . . . 
+BAT_EXIT=1 

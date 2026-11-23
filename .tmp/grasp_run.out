@@ -1,0 +1,54 @@
+=== GRASP TEST START 18:43:57 ===
+[0;36m[1m
+==========================================================
+      SPARK ROBOT - CUBE GRASP PREPARATION & TEST       
+==========================================================
+[0m
+Already patched or pattern not found in: /home/spark/spark_noetic/src/spark_driver/arm/uArm/swiftpro/src/swiftpro_write_node.cpp
+Already patched or pattern not found in: /home/spark/spark_noetic/src/spark_driver/arm/uArm/swiftpro/src/swiftpro_read_node.cpp
+[1/4] Checking base chassis and camera...
+      [1;33mLaunching base drivers (driver_bringup.launch)...[0m
+      [0;32m[OK] Base chassis and camera active.[0m
+[2/4] Checking uArm manipulator driver...
+      [1;33mLaunching manipulator driver (pro_control_nomoveit.launch)...[0m
+      [0;32m[OK] uArm manipulator active.[0m
+[3/4] Checking neural network cube detector (/detector_node)...
+      [1;33mLaunching neural network cube detector...[0m
+      Waiting for neural network weights initialization...
+      [0;32m[OK] Cube detector active and publishing to /objects.[0m
+[4/4] [0;36m[1mAll drivers ready. Starting grasp logic...[0m
+==========================================================
+
+[INFO] [1795344251.854632]: >> [VISION] items_config.yaml loaded, item ids: [3, 1, 2, 4]
+[INFO] [1795344251.863606]: >> [CALIB] matrix from /home/spark/transform_3d.dat: 1.05 px/mm at the workspace, round-trip 0.0 mm
+[INFO] [1795344251.865586]: >> [CALIB] fitted 2026-11-22T15:38:34 from 11 pose(s), leave-one-out max 0.7 px / mean 0.5 px
+[INFO] [1795344252.071104]: Setting arm motor status: True
+[INFO] [1795344252.372784]: Setting arm pump state: False
+[INFO] [1795344252.574500]: Setting arm motor status: True
+[CONFIG] depth scale=0.386784 | cake touch z=40.0 mm | floor touch z=-55.0 mm
+[INFO] [1795344257.287186]: >> [VISION] 16 cube(s) from 4 frame(s): [[3, [512, 284, 0]], [1, [483, 136, 0]], [1, [184, 155, 0]], [1, [467, 32, 0]], [1, [186, 221, 0]], [3, [444, 298, 0]], [2, [334, 37, 0]], [2, [188, 40, 0]], [4, [176, 298, 0]], [2, [332, 164, 0]], [4, [347, 290, 0]], [1, [487, 208, 0]], [3, [334, 210, 0]], [2, [191, 362, 0]], [2, [344, 351, 0]], [2, [507, 348, 0]]]
+[SCAN_init] Detections (samples=5): [[3, [512, 284, 0]], [1, [483, 136, 0]], [1, [184, 155, 0]], [1, [467, 32, 0]], [1, [186, 221, 0]], [3, [444, 298, 0]], [2, [334, 37, 0]], [2, [188, 40, 0]], [4, [176, 298, 0]], [2, [332, 164, 0]], [4, [347, 290, 0]], [1, [487, 208, 0]], [3, [334, 210, 0]], [2, [191, 362, 0]], [2, [344, 351, 0]], [2, [507, 348, 0]]]
+[TARGET] Cake depth reading hit floor/background (z=-45.1) -> using cake affine
+[DECISION] (Attempt 1/3) 1) Cake IN REACH -> pick immediately without base motion
+[TARGET] mode=cake class=2 xy=(348.0, 17.0) in_reach=True dist=348.4 z_est=None
+======================================================================
+GRASP -> LIFT -> HOLD 5.0 s -> RETURN -> PARK
+plan: mode=cake class=2 xy=(348.0, 17.0) approach=75.0 touch=37.0 lift=80.0
+======================================================================
+[1/6] Lowering the manipulator above the cube (z=75.0 mm)
+[2/6] Vacuum ON; descending strictly vertically to the cube (z=37.0 mm)
+[INFO] [1795344258.679245]: Setting arm pump state: True
+[3/6] Raising the cube strictly vertically (z=80.0 mm)
+[4/6] Holding the cube in the raised position for 5.0 s
+      hold finished
+[5/6] Lowering the cube strictly vertically back to the pickup point
+      cube is resting on the ground: vacuum OFF
+[INFO] [1795344269.940277]: Setting arm pump state: False
+[6/6] Returning the manipulator to its initial position (50.0, 180.0, 160.0)
+[DONE] Cube returned to its original position; arm parked.
+[COMPLETED] result=DONE
+
+==========================================================
+[0;32m[1m[OK] Test completed successfully.[0m
+==========================================================
+=== GRASP TEST EXIT CODE: 0 ===

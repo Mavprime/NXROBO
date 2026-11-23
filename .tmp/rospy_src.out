@@ -1,0 +1,386 @@
+=== rospy/timer.py sleep ===
+# Software License Agreement (BSD License)
+#
+# Copyright (c) 2010, Willow Garage, Inc.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#
+#  * Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#  * Redistributions in binary form must reproduce the above
+#    copyright notice, this list of conditions and the following
+#    disclaimer in the documentation and/or other materials provided
+#    with the distribution.
+#  * Neither the name of Willow Garage, Inc. nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+#
+# Revision $Id: __init__.py 12069 2010-11-09 20:31:55Z kwc $
+
+import threading
+import time
+
+# for Time, Duration
+import genpy
+
+import rospy.core
+import rospy.rostime
+
+# author: tfield (Timers)
+# author: kwc (Rate, sleep)
+
+class Rate(object):
+    """
+    Convenience class for sleeping in a loop at a specified rate
+    """
+    
+    def __init__(self, hz, reset=False):
+        """
+        Constructor.
+        @param hz: hz rate to determine sleeping
+        @type  hz: float
+        @param reset: if True, timer is reset when rostime moved backward. [default: False]
+        @type  reset: bool
+        """
+        # #1403
+        self.last_time = rospy.rostime.get_rostime()
+        self.sleep_dur = rospy.rostime.Duration(0, int(1e9/hz))
+        self._reset = reset
+
+    def _remaining(self, curr_time):
+        """
+        Calculate the time remaining for rate to sleep.
+        @param curr_time: current time
+        @type  curr_time: L{Time}
+        @return: time remaining
+        @rtype: L{Time}
+        """
+        # detect time jumping backwards
+        if self.last_time > curr_time:
+            self.last_time = curr_time
+
+        # calculate remaining time
+        elapsed = curr_time - self.last_time
+        return self.sleep_dur - elapsed
+
+    def remaining(self):
+        """
+        Return the time remaining for rate to sleep.
+        @return: time remaining
+        @rtype: L{Time}
+        """
+        curr_time = rospy.rostime.get_rostime()
+        return self._remaining(curr_time)
+
+    def sleep(self):
+        """
+        Attempt sleep at the specified rate. sleep() takes into
+        account the time elapsed since the last successful
+        sleep().
+        
+        @raise ROSInterruptException: if ROS shutdown occurs before
+        sleep completes
+        @raise ROSTimeMovedBackwardsException: if ROS time is set
+        backwards
+        """
+        curr_time = rospy.rostime.get_rostime()
+        try:
+            sleep(self._remaining(curr_time))
+        except rospy.exceptions.ROSTimeMovedBackwardsException:
+            if not self._reset:
+                raise
+            self.last_time = rospy.rostime.get_rostime()
+            return
+        self.last_time = self.last_time + self.sleep_dur
+
+        # detect time jumping forwards, as well as loops that are
+        # inherently too slow
+        if curr_time - self.last_time > self.sleep_dur * 2:
+            self.last_time = curr_time
+
+def sleep(duration):
+    """
+    sleep for the specified duration in ROS time. If duration
+    is negative, sleep immediately returns.
+    
+    @param duration: seconds (or rospy.Duration) to sleep
+    @type  duration: float or Duration
+    @raise ROSInterruptException: if ROS shutdown occurs before sleep
+    completes
+    @raise ROSTimeMovedBackwardsException: if ROS time is set
+    backwards
+    """
+    if rospy.rostime.is_wallclock():
+        if isinstance(duration, genpy.Duration):
+            duration = duration.to_sec()
+        if duration < 0:
+            return
+        else:
+            rospy.rostime.wallsleep(duration)
+    else:
+        initial_rostime = rospy.rostime.get_rostime()
+        if not isinstance(duration, genpy.Duration):
+            duration = genpy.Duration.from_sec(duration)
+
+        rostime_cond = rospy.rostime.get_rostime_cond()
+
+        # #3123
+        if initial_rostime == genpy.Time(0):
+            # break loop if time is initialized or node is shutdown
+            while initial_rostime == genpy.Time(0) and \
+                      not rospy.core.is_shutdown():
+                with rostime_cond:
+                    rostime_cond.wait(0.3)
+                initial_rostime = rospy.rostime.get_rostime()
+
+        sleep_t = initial_rostime + duration
+
+        # break loop if sleep_t is reached, time moves backwards, or
+        # node is shutdown
+        while rospy.rostime.get_rostime() < sleep_t and \
+              rospy.rostime.get_rostime() >= initial_rostime and \
+                  not rospy.core.is_shutdown():
+            with rostime_cond:
+                rostime_cond.wait(0.5)
+
+        if rospy.rostime.get_rostime() < initial_rostime:
+            time_jump = (initial_rostime - rospy.rostime.get_rostime()).to_sec()
+            raise rospy.exceptions.ROSTimeMovedBackwardsException(time_jump)
+        if rospy.core.is_shutdown():
+            raise rospy.exceptions.ROSInterruptException("ROS shutdown request")
+
+class TimerEvent(object):
+    """
+    Constructor.
+    @param last_expected: in a perfect world, this is when the previous callback should have happened
+    @type  last_expected: rospy.Time
+    @param last_real: when the callback actually happened
+    @type  last_real: rospy.Time
+    @param current_expected: in a perfect world, this is when the current callback should have been called
+    @type  current_expected: rospy.Time
+    @param current_real: when the current callback is actually being called
+                         (rospy.Time.now() as of immediately before calling the callback)
+    @type  current_real: rospy.Time
+    @param last_duration: contains the duration of the last callback (end time minus start time) in seconds.
+                          Note that this is always in wall-clock time.
+    @type  last_duration: float
+    """
+    def __init__(self, last_expected, last_real, current_expected, current_real, last_duration):
+        self.last_expected    = last_expected
+        self.last_real        = last_real
+        self.current_expected = current_expected
+        self.current_real     = current_real
+        self.last_duration    = last_duration
+
+class Timer(threading.Thread):
+    """
+    Convenience class for calling a callback at a specified rate
+    """
+
+    def __init__(self, period, callback, oneshot=False, reset=False):
+        """
+        Constructor.
+        @param period: desired period between callbacks
+        @type  period: rospy.Duration
+        @param callback: callback to be called
+        @type  callback: function taking rospy.TimerEvent
+        @param oneshot: if True, fire only once, otherwise fire continuously until shutdown is called [default: False]
+        @type  oneshot: bool
+        @param reset: if True, timer is reset when rostime moved backward. [default: False]
+        @type  reset: bool
+        """
+        super(Timer, self).__init__()
+        self._period   = period
+        self._callback = callback
+        self._oneshot  = oneshot
+        self._reset = reset
+        self._shutdown = False
+        self.daemon = True
+        self.start()
+
+    def shutdown(self):
+        """
+        Stop firing callbacks.
+        """
+        self._shutdown = True
+=== rostime wallsleep / is_wallclock ===
+237:def is_wallclock():
+238-    """
+239-    Internal use for ROS-time routines.
+240-    @return: True if ROS is currently using wallclock time
+241-    @rtype: bool
+242-    """
+243-    return _rostime_current == None
+244-    
+245-def switch_to_wallclock():
+246-    """
+247-    Internal use.
+248-    Switch ROS to wallclock time. This is mainly for testing purposes.
+249-    """
+250-    global _rostime_current
+251-    _rostime_current = None
+252-    try:
+253-        _rostime_cond.acquire()
+254-        _rostime_cond.notifyAll()
+255-    finally:
+256-        _rostime_cond.release()
+257-
+258:def wallsleep(duration):
+259-    """
+260-    Internal use.
+261-    Windows interrupts time.sleep with an IOError exception
+262-    when a signal is caught. Even when the signal is handled
+263-    by a callback, it will then proceed to throw IOError when
+264-    the handling has completed. 
+265-
+266-    Refer to https://code.ros.org/trac/ros/ticket/3421.
+267-
+268-    So we create a platform dependant wrapper to handle this
+269-    here.
+270-    """
+271-    if sys.platform in ['win32']: # cygwin seems to be ok
+272-        try:
+273-            time.sleep(duration)
+274-        except IOError:
+275-            pass
+276-    else:
+277-        time.sleep(duration) 
+=== core _ros_signal ===
+605:def _ros_signal(sig, stackframe):
+606-    signal_shutdown("signal-"+str(sig))
+607-    prev_handler = _signalChain.get(sig, None)
+608-    if callable(prev_handler):
+609-        try:
+610-            prev_handler(sig, stackframe)
+611-        except KeyboardInterrupt:
+612-            pass #filter out generic keyboard interrupt handler
+613-
+614-def _ros_atexit():
+615-    signal_shutdown('atexit')
+616-atexit.register(_ros_atexit)
+617-
+618-# #687
+619-def register_signals():
+620-    """
+621-    register system signal handlers for SIGTERM and SIGINT
+622-    """
+623-    _signalChain[signal.SIGTERM] = signal.signal(signal.SIGTERM, _ros_signal)
+624-    _signalChain[signal.SIGINT]  = signal.signal(signal.SIGINT, _ros_signal)
+625-    
+626-# Validators ######################################
+627-
+628-def is_topic(param_name):
+629-    """
+630-    Validator that checks that parameter is a valid ROS topic name
+631-    """    
+632-    def validator(param_value, caller_id):
+633-        v = valid_name_validator_resolved(param_name, param_value, caller_id)
+634-        if param_value == '/':
+635-            raise ParameterInvalid("ERROR: parameter [%s] cannot be the global namespace"%param_name)            
+636-        return v
+637-    return validator
+638-
+639-_xmlrpc_cache = {}
+640-_xmlrpc_lock = threading.Lock()
+641-
+642-def xmlrpcapi(uri, cache=True):
+643-    """
+644-    @return: instance for calling remote server or None if not a valid URI
+645-    @rtype: xmlrpclib.ServerProxy
+=== topics publish ===
+857-                "Please see http://wiki.ros.org/rospy/Overview/Publishers%20and%20Subscribers for more information.", SyntaxWarning, stacklevel=2)
+858-
+859:    def publish(self, *args, **kwds):
+860-        """
+861-        Publish message data object to this topic. 
+862-        Publish can either be called with the message instance to
+863-        publish or with the constructor args for a new Message
+864-        instance, i.e.::
+865-          pub.publish(message_instance)
+866-          pub.publish(message_field_1, message_field_2...)            
+867-          pub.publish(message_field_1='foo', message_field_2='bar')
+868-    
+869-        @param args : L{Message} instance, message arguments, or no args if keyword arguments are used
+870-        @param kwds : Message keyword arguments. If kwds are used, args must be unset
+871-        @raise ROSException: If rospy node has not been initialized
+872-        @raise ROSSerializationException: If unable to serialize
+873-        message. This is usually a type error with one of the fields.
+874-        """
+875-        if self.impl is None:
+876-            raise ROSException("publish() to an unregistered() handle")
+877-        if not is_initialized():
+878-            raise ROSException("ROS node has not been initialized yet. Please call init_node() first")
+879-        data = args_kwds_to_message(self.data_class, args, kwds)
+880-        try:
+881-            self.impl.acquire()
+882-            self.impl.publish(data)
+883-        except genpy.SerializationError as e:
+884-            # can't go to rospy.logerr(), b/c this could potentially recurse
+--
+997-            c = QueuedConnection(c, self.queue_size)
+998-        super(_PublisherImpl, self).add_connection(c)
+999:        def publish_single(data):
+1000-            self.publish(data, connection_override=c)
+1001-        for l in self.subscriber_listeners:
+1002-            l.peer_subscribe(self.resolved_name, self.publish, publish_single)
+1003-        if self.is_latch and self.latch is not None:
+1004-            with self.publock:
+1005-                self.publish(self.latch, connection_override=c)
+1006-        return True
+1007-            
+1008-    def remove_connection(self, c):
+1009-        """
+1010-        Remove existing connection from this topic.
+1011-        @param c: connection instance to remove
+1012-        @type  c: L{Transport}
+1013-        """
+1014-        super(_PublisherImpl, self).remove_connection(c)
+1015-        num = len(self.connections)                
+1016-        for l in self.subscriber_listeners:
+1017-            l.peer_unsubscribe(self.resolved_name, num)
+1018-            
+1019:    def publish(self, message, connection_override=None):
+1020-        """
+1021-        Publish the data to the topic. If the topic has no subscribers,
+1022-        the method will return without any affect. Access to publish()
+1023-        should be locked using acquire() and release() in order to
+1024-        ensure proper message publish ordering.
+1025-
+1026-        @param message: message data instance to publish
+1027-        @type  message: L{Message}
+1028-        @param connection_override: publish to this connection instead of all
+1029-        @type  connection_override: L{Transport}
+1030-        @return: True if the data was published, False otherwise.
+1031-        @rtype: bool
+1032-        @raise genpy.SerializationError: if L{Message} instance is unable to serialize itself
+1033-        @raise rospy.ROSException: if topic has been closed or was closed during publish()
+1034-        """
+1035-        #TODO: should really just use IOError instead of rospy.ROSException
+1036-
+1037-        if self.closed:
+1038-            # during shutdown, the topic can get closed, which creates
+1039-            # a race condition with user code testing is_shutdown
+1040-            if not is_shutdown():
+1041-                raise ROSException("publish() to a closed topic")
+1042-            else:
+1043-                return
+1044-            
+=== use_sim_time ===
+bash: line 10: rosparam: command not found
+=== DONE ===

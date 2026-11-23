@@ -1,0 +1,5 @@
+[INFO] [1795349027.718704]: >> [CALIB] matrix from /home/spark/transform_3d.dat: 1.05 px/mm at the workspace, round-trip 0.0 mm
+[INFO] [1795349027.720508]: >> [CALIB] fitted 2026-11-22T15:38:34 from 11 pose(s), leave-one-out max 0.7 px / mean 0.5 px
+[INFO] [1795349027.929472]: Setting arm motor status: True
+[INFO] [1795349028.231352]: >> [VISUAL-SERVO] Fast base turn: -12.3 deg, duration 0.29s, vel=-0.75 rad/s
+HEADING_RESTORED

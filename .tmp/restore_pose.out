@@ -1,0 +1,7 @@
+[INFO] [1795349539.543685]: >> [CALIB] fitted 2026-11-22T15:38:34 from 11 pose(s), leave-one-out max 0.7 px / mean 0.5 px
+[INFO] [1795349539.749603]: Setting arm motor status: True
+[INFO] [1795349540.051563]: >> [VISUAL-SERVO] Base distance correction: -12.7 cm, duration 0.71s, vel=-0.18 m/s
+[INFO] [1795349541.427758]: >> [VISUAL-SERVO] Fast base turn: -3.0 deg, duration 0.08s, vel=-0.75 rad/s
+POSE_RESTORED
+CLEANED
+92

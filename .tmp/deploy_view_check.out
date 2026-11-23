@@ -1,0 +1,10 @@
+=== UPLOADED FILES ===
+-rw-rw-r-- 1 spark spark 9450 11月 22 19:19 /home/spark/codes/robot_view.py
+-rwxrwxr-x 1 spark spark 6902 11月 22 19:19 /home/spark/codes/run_grasp_test.sh
+6934179aada88aed893cfa49c8de341d  /home/spark/codes/robot_view.py
+eb4547f3825b654624aa175e7b9dd47a  /home/spark/codes/run_grasp_test.sh
+=== BASH SYNTAX CHECK ===
+BASH_SYNTAX_OK
+=== PY COMPILE ===
+ROBOT_VIEW_COMPILE_OK
+=== DONE ===

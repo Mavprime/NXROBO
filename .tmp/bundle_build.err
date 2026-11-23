@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "D:\NXROBO\.tmp\make_bundle.py", line 437, in <module>
+    OUT.write_text("\n".join(out) + "\n", encoding="utf-8")
+  File "C:\Users\user1\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\Lib\pathlib.py", line 1047, in write_text
+    with self.open(mode='w', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user1\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\Lib\pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: 'D:\\NXROBO\\auto\\docs\\project_bundle.txt'

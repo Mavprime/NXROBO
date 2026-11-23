@@ -1,0 +1,17 @@
+=== MD5 CODES ===
+73d7c9738bafd880fcc71467b666924b  /home/spark/codes/grasp_generic.py
+565ffe75ef693aba8522e8d0445359d4  /home/spark/codes/match_logic.py
+29adba4165f7d2f3a93659574617b3ae  /home/spark/codes/detect_ros.py
+03717e8b10fec2a5c423f12268c7376c  /home/spark/codes/runtask.py
+=== MD5 NODES ===
+565ffe75ef693aba8522e8d0445359d4  /home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/match_logic.py
+29adba4165f7d2f3a93659574617b3ae  /home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/detect_ros.py
+=== CAKE GATES IN DEPLOYED FILES ===
+/home/spark/codes/match_logic.py:530:CAKE_CONF_THRESHOLD = 0.85
+/home/spark/codes/detect_ros.py:47:CAKE_PUBLISH_CONF = 0.85
+/home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/match_logic.py:530:CAKE_CONF_THRESHOLD = 0.85
+/home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/detect_ros.py:47:CAKE_PUBLISH_CONF = 0.85
+=== STOP OLD DETECTOR (will restart with new gate) ===
+=== PY_COMPILE ===
+PY_COMPILE_OK
+=== DONE ===

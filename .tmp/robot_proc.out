@@ -1,0 +1,13 @@
+   1155       14:32 avahi-daemon: running [spark.local]
+   1171       14:32 /usr/bin/python3 /usr/bin/networkd-dispatcher --run-startup-triggers
+   1271       14:31 /usr/bin/python3 /usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal
+   1409       14:30 /opt/spark-wifi-connect/serial_control /dev/ttyS3 wlo1
+   1410       14:30 /usr/bin/x11vnc -auth guess -once -loop -noxdamage -repeat -passwd spark -rfbport 5900 -shared -capslock -nomodtweak
+   2550       14:24 /usr/lib/systemback/sbscheduler spark
+   2710       13:55 /usr/bin/python3 /usr/share/ibus-table/engine/main.py --ibus
+   3113       00:00 sshd: spark [priv]
+   3169       00:00 sshd: spark@notty
+---NODES---
+ERROR: Unable to communicate with master!
+---TOPICS---
+ERROR: Unable to communicate with master!

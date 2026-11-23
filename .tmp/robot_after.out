@@ -1,0 +1,13 @@
+=== LAST RUN LOG LINE ===
+{"ts": "2026-11-22T17:30:56", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [281.0, 239.0], "xy": [328.6, 52.5], "z_est": null}}
+{"ts": "2026-11-22T17:32:06", "result": "MISS", "case": 1, "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [323.0, 167.0], "xy": [348.0, 23.3], "z_est": null}}
+{"ts": "2026-11-22T18:44:11", "result": "DONE", "target": {"mode": "cake", "is_cake": true, "class": 2, "pixel": [332.0, 164.0], "xy": [348.0, 17.0], "z_est": null}, "plan": {"mode": "cake", "x": 348.0, "y": 17.0, "z_approach": 75.0, "z_touch": 37.0, "z_lift": 80.0, "class_id": 2, "pixel": [332.0, 164.0]}, "hold_seconds": 5.0}
+=== ARM FINAL STATE (/SwiftproState_topic) ===
+ERROR: Cannot load message class for [swiftpro/SwiftproState]. Are your messages built?
+=== PUMP TOPIC INFO ===
+/detector_node
+/spark_base_server
+/swiftpro_read_node
+/swiftpro_rviz_node
+/swiftpro_write_node
+=== DONE ===

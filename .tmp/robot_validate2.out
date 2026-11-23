@@ -1,0 +1,11 @@
+=== REMOTE FILE ===
+-rwxrwxr-x 1 spark spark 33617 11月 22 18:57 /home/spark/codes/grasp_generic.py
+d239ecff92c3ff1f4309acc7f34fa2b6  /home/spark/codes/grasp_generic.py
+822 /home/spark/codes/grasp_generic.py
+=== PY_COMPILE ===
+PY_COMPILE_OK
+=== IMPORT + PLAN SMOKE (no motion) ===
+FLOOR_PLAN GraspPlan(mode='floor', x=240.0, y=0.0, z_approach=70.0, z_touch=-58.0, z_lift=60.0, class_id=1, pixel=(320.0, 270.0))
+CAKE_PLAN GraspPlan(mode='cake', x=330.0, y=10.0, z_approach=75.0, z_touch=37.0, z_lift=80.0, class_id=2, pixel=(320.0, 240.0))
+IMPORT_AND_PLAN_SMOKE_OK
+=== DONE ===

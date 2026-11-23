@@ -1,0 +1,64 @@
+=== VIEW MODE START 19:19:05 ===
+[0;36m[1m
+==========================================================
+      SPARK ROBOT - CUBE GRASP PREPARATION & TEST       
+==========================================================
+[0m
+Already patched or pattern not found in: /home/spark/spark_noetic/src/spark_driver/arm/uArm/swiftpro/src/swiftpro_write_node.cpp
+Already patched or pattern not found in: /home/spark/spark_noetic/src/spark_driver/arm/uArm/swiftpro/src/swiftpro_read_node.cpp
+[1/4] Checking base chassis and camera...
+      [0;32m[OK] Base chassis and camera active.[0m
+[2/4] Checking uArm manipulator driver...
+      [0;32m[OK] uArm manipulator active.[0m
+[3/4] Checking neural network cube detector (/detector_node)...
+      [0;32m[OK] Cube detector active and publishing to /objects.[0m
+[4/4] [0;36m[1mVIEW MODE: saving an annotated camera frame...[0m
+==========================================================
+
+[INFO] [1795346348.534595]: Setting arm motor status: True
+[VIEW] arm parked at (50, 180, 160) for a clean camera view
+[VIEW] waiting for /objects and /camera/color/image_raw ...
+
+=== WHAT THE ROBOT SEES ===
+raw detections published by the detector on /objects (last frame): 15
+  teddy          id=1   score=0.93 center=(184, 155) box=95x88
+  teddy          id=1   score=0.92 center=(487, 139) box=96x85
+  teddy          id=1   score=0.92 center=(469, 31) box=92x63
+  clock          id=3   score=0.96 center=(513, 284) box=107x106
+  clock          id=3   score=0.92 center=(337, 147) box=97x85
+  clock          id=3   score=0.91 center=(333, 34) box=85x69
+  banana         id=4   score=0.79 center=(189, 43) box=103x78
+  banana         id=4   score=0.78 center=(178, 299) box=138x120
+  banana         id=4   score=0.75 center=(347, 297) box=133x116
+  banana         id=4   score=0.29 center=(65, 194) box=125x371
+  teddy_site(10) id=10  score=0.92 center=(185, 221) box=99x45
+  teddy_site(10) id=10  score=0.61 center=(486, 209) box=98x47
+  clock_site(30) id=30  score=0.87 center=(333, 214) box=101x42
+  clock_site(30) id=30  score=0.87 center=(443, 298) box=38x107
+  clock_site(30) id=30  score=0.42 center=(334, 87) box=92x32
+
+=== AFTER TEMPORAL CLUSTERING + CAKE GATE (what the grasp logic uses) ===
+ordinary conf floor: 0.35 | cake gate: 0.85
+  TARGET CANDIDATE: teddy id=1 at px=(184, 155)
+  TARGET CANDIDATE: teddy id=1 at px=(487, 138)
+  TARGET CANDIDATE: teddy id=1 at px=(469, 31)
+  TARGET CANDIDATE: teddy id=1 at px=(185, 221)
+  TARGET CANDIDATE: teddy id=1 at px=(486, 208)
+  TARGET CANDIDATE: cake id=2 at px=(188, 42)
+  TARGET CANDIDATE: clock id=3 at px=(513, 284)
+  TARGET CANDIDATE: clock id=3 at px=(337, 147)
+  TARGET CANDIDATE: clock id=3 at px=(333, 35)
+  TARGET CANDIDATE: clock id=3 at px=(443, 297)
+  TARGET CANDIDATE: clock id=3 at px=(333, 214)
+  TARGET CANDIDATE: clock id=3 at px=(334, 87)
+  TARGET CANDIDATE: banana id=4 at px=(178, 299)
+  TARGET CANDIDATE: banana id=4 at px=(347, 298)
+
+[VIEW] saved: /home/spark/logs/latest_view.jpg
+[VIEW] saved: /home/spark/logs/view_20261122_191912.jpg
+
+==========================================================
+[0;32m[1m[OK] Annotated view saved on the robot: ~/logs/latest_view.jpg[0m
+==========================================================
+=== VIEW MODE EXIT: 0 ===
+-rw-rw-r-- 1 spark spark 81821 11月 22 19:19 /home/spark/logs/latest_view.jpg

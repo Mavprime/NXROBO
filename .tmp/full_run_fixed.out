@@ -1,0 +1,43 @@
+timeout 240 bash -l /home/spark/codes/run_grasp_test.sh 2>&1 | tail -n 70
+echo "SCRIPT_EXIT: $?"]0;spark@spark: ~[01;32mspark@spark[00m:[01;34m~[00m$ timeout 240 bash -l /home/spark/codes/run_grasp_test.sh 2>&1 | tail -n 70
+[0;36m[1m
+==========================================================
+      SPARK ROBOT - CUBE GRASP PREPARATION & TEST       
+==========================================================
+[0m
+Already patched or pattern not found in: /home/spark/spark_noetic/src/spark_driver/arm/uArm/swiftpro/src/swiftpro_write_node.cpp
+Already patched or pattern not found in: /home/spark/spark_noetic/src/spark_driver/arm/uArm/swiftpro/src/swiftpro_read_node.cpp
+[1/4] Checking base chassis and camera...
+      [0;32m[OK] Base chassis and camera active.[0m
+[2/4] Checking uArm manipulator driver...
+      [0;32m[OK] uArm manipulator active.[0m
+[3/4] Checking neural network cube detector (/detector_node)...
+      [0;32m[OK] Cube detector active and publishing to /objects.[0m
+[4/4] [0;36m[1mAll drivers ready. Starting grasp logic...[0m
+==========================================================
+
+[INFO] [1795349046.471193]: >> [VISION] items_config.yaml loaded, item ids: [3, 1, 2, 4]
+[INFO] [1795349046.478892]: >> [CALIB] matrix from /home/spark/transform_3d.dat: 1.05 px/mm at the workspace, round-trip 0.0 mm
+[INFO] [1795349046.480574]: >> [CALIB] fitted 2026-11-22T15:38:34 from 11 pose(s), leave-one-out max 0.7 px / mean 0.5 px
+[INFO] [1795349046.686414]: Setting arm motor status: True
+[INFO] [1795349046.989098]: Setting arm motor status: True
+[CONFIG] depth scale=0.386784 | cake touch z=40.0 mm | floor touch z=-55.0 mm
+[INFO] [1795349051.701443]: >> [VISION] 6 cube(s) from 4 frame(s): [[3, [475, 107, 0]], [3, [480, 40, 0]], [2, [212, 112, 0]], [2, [333, 110, 0]], [4, [334, 48, 0]], [4, [85, 427, 0]]]
+[SCAN_init] Detections (samples=5, conf>=0.04, cake_conf>=0.90, cake_site_conf>=0.60): [[3, [475, 107, 0]], [3, [480, 40, 0]], [2, [212, 112, 0]], [2, [333, 110, 0]], [4, [334, 48, 0]], [4, [85, 427, 0]]]
+[SCAN_init] 5 target(s) beyond the calibrated near field (out of arm reach): [(3, 475.0, 107.0), (3, 480.0, 40.0), (2, 212.0, 112.0), (2, 333.0, 110.0), (4, 334.0, 48.0)] -> base approach required
+[DECISION] (Attempt 1/4) 4) Standard cube OUT OF REACH -> one base approach, then re-scan
+[TARGET] mode=floor class=4 xy=(103.2, 207.3) far=False in_reach=False dist=231.6 z_est=None
+[APPROACH] Aligning heading: 63.5 deg
+[INFO] [1795349051.757788]: >> [VISUAL-SERVO] Fast base turn: 63.5 deg, duration 1.48s, vel=0.75 rad/s
+[APPROACH] Base motion complete. Settling the chassis for 0.85 s ...
+[RETRY] Base stopped; re-scanning and re-checking the reach ...
+[INFO] [1795349058.609716]: >> [VISION] 0 cube(s) from 4 frame(s): []
+[SCAN_approach_1] Detections (samples=5, conf>=0.04, cake_conf>=0.90, cake_site_conf>=0.60): []
+[SCAN_approach_1] No valid cubes detected in the camera window
+[FAIL] no valid target detected on the field
+[COMPLETED] result=NO_TARGET
+
+==========================================================
+[0;31m[1m[ERROR] Test failed with exit code: 3[0m
+==========================================================
+]0;spark@spark: ~[01;32mspark@spark[00m:[01;34m~[00m$ echo "SCRIPT_EXIT: $?"client_loop: send disconnect: Connection reset

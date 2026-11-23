@@ -1,0 +1,651 @@
+warning: in the working copy of '.tmp\bundle\auto\codes\runtask.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'auto\codes\runtask.py', LF will be replaced by CRLF the next time Git touches it
+diff --git "a/.tmp\\bundle\\auto\\codes\\runtask.py" "b/auto\\codes\\runtask.py"
+index 8819ab6..8193ee9 100644
+--- "a/.tmp\\bundle\\auto\\codes\\runtask.py"
++++ "b/auto\\codes\\runtask.py"
+@@ -154,5 +154,5 @@ class CamAction:
+         # Rolling buffer of (monotonic timestamp, frame) for temporal voting.
+         # A frame is a list of (raw_id, score, cx, cy) tuples.
+-        self._frames = deque(maxlen=max(2, GRASP_FRAMES))
++        self._frames = deque(maxlen=max(16, GRASP_FRAMES))
+         self._lock = threading.Lock()
+         self.sub = rospy.Subscriber(
+@@ -212,10 +212,19 @@ class CamAction:
+         meta = self._read_calibration_meta()
+         self.calib_meta = meta
++        self.calib_meta_stale = False
+         if meta:
+-            rospy.loginfo(">> [CALIB] fitted %s from %s pose(s), leave-one-out "
+-                          "max %.1f px / mean %.1f px"
+-                          % (meta.get("created", "?"), meta.get("poses", "?"),
+-                             float(meta.get("loo_max_px", 0.0)),
+-                             float(meta.get("loo_mean_px", 0.0))))
++            stored_md5 = meta.get("file_md5")
++            if stored_md5 and self.calib_md5 and stored_md5 != self.calib_md5:
++                self.calib_meta_stale = True
++                rospy.logerr(">> [CALIB] MD5 MISMATCH between %s (%s) and "
++                             "transform_3d.meta.json (%s)! Matrix may have been "
++                             "overwritten; forcing active pad check."
++                             % (path, self.calib_md5[:8], stored_md5[:8]))
++            else:
++                rospy.loginfo(">> [CALIB] fitted %s from %s pose(s), leave-one-out "
++                              "max %.1f px / mean %.1f px"
++                              % (meta.get("created", "?"), meta.get("poses", "?"),
++                                 float(meta.get("loo_max_px", 0.0)),
++                                 float(meta.get("loo_mean_px", 0.0))))
+         elif source == path:
+             rospy.logwarn(">> [CALIB] no calibration metadata next to %s: "
+@@ -314,33 +323,9 @@ class CamAction:
+     def pixel_to_arm_at_z(self, u, v, z, x0=200.0, y0=0.0):
+         '''
+-        Wrist (x, y) whose suction-pad projection lands on pixel (u, v) at a
+-        known surface height z.  Uses the calibrated 3D transform and camera
+-        intrinsics, so it needs no depth and cannot be fooled by the arm
+-        occluding the cube.
++        Exact closed-form inverse of the calibrated 3D projective map at height z.
++        Delegates to match_logic.pixel_to_xy_at_z (replaces the old 30-step Newton
++        approximation, SI-35).
+         '''
+-        x, y = float(x0), float(y0)
+-        for _ in range(30):
+-            p = self.project_wrist(x, y, z)
+-            if p is None:
+-                return None
+-            ex, ey = u - p[0], v - p[1]
+-            if math.hypot(ex, ey) < 0.5:
+-                break
+-            px = self.project_wrist(x + 1.0, y, z)
+-            py = self.project_wrist(x, y + 1.0, z)
+-            if px is None or py is None:
+-                return None
+-            J = np.array([[px[0] - p[0], py[0] - p[0]],
+-                          [px[1] - p[1], py[1] - p[1]]], dtype=float)
+-            try:
+-                d = np.linalg.solve(J, np.array([ex, ey], dtype=float))
+-            except Exception:
+-                return None
+-            d = np.clip(d, -60.0, 60.0)
+-            x += float(d[0])
+-            y += float(d[1])
+-            x = min(max(x, 50.0), 350.0)
+-            y = min(max(y, -210.0), 210.0)
+-        return x, y
++        return match_logic.pixel_to_xy_at_z(self.transform3d, u, v, z)
+ 
+     def detector(self, num_samples=None, timeout=3.0, conf_threshold=None,
+@@ -412,19 +397,19 @@ class ArmAction:
+         self.cam = cam if cam is not None else CamAction()
+ 
+-        # Calibration data for Layer 1
+-        filename = os.environ['HOME'] + "/thefile.txt"
+-        with open(filename, 'r') as f:
+-            s = f.read()
+-        arr = s.split()
+-        self.x_kb = [float(arr[0]), float(arr[1])]
+-        self.y_kb = [float(arr[2]), float(arr[3])]
+-
+-        # Calibration data for Layer 2
+-        filename1 = os.environ['HOME'] + "/thefile2.txt"
+-        with open(filename1, 'r') as f1:
+-            s1 = f1.read()
+-        arr1 = s1.split()
+-        self.x_kb1 = [float(arr1[0]), float(arr1[1])]
+-        self.y_kb1 = [float(arr1[2]), float(arr1[3])]        
++        # Legacy 2D calibration data (kept non-fatal; grasping/stacking uses DLT / load_cake_calibration)
++        self.x_kb = [-0.9378424923039294, 455.38400259870104]
++        self.y_kb = [-0.8247427954917984, 289.0207362441075]
++        try:
++            with open(os.path.expanduser("~/thefile.txt"), 'r') as f:
++                arr = f.read().split()
++            if len(arr) >= 4:
++                self.x_kb = [float(arr[0]), float(arr[1])]
++                self.y_kb = [float(arr[2]), float(arr[3])]
++        except Exception as exc:
++            rospy.logwarn(f">> [ARM] legacy ~/thefile.txt unavailable ({exc}); using defaults")
++
++        x_kb1, y_kb1 = match_logic.load_cake_calibration()
++        self.x_kb1 = [float(x_kb1[0]), float(x_kb1[1])]
++        self.y_kb1 = [float(y_kb1[0]), float(y_kb1[1])]
+     
+         # 创建机械臂控制接口的对象
+@@ -569,139 +554,188 @@ class ArmAction:
+         rospy.sleep(0.10)
+ 
++    @staticmethod
++    def _load_cake_touch_z(default=40.0):
++        '''Read calibrated tier-2 cake touch height from ~/logs/cake_smooth_state.json.'''
++        state_path = os.path.expanduser("~/logs/cake_smooth_state.json")
++        try:
++            with open(state_path, "r", encoding="utf8") as handle:
++                val = json.load(handle).get("touch_z")
++            if val is not None:
++                return float(val)
++        except Exception:
++            pass
++        return float(default)
++
++    def _build_floor_candidates(self, cube_list, preferred_id=None):
++        '''Convert /objects clusters into near/far target dicts using match_logic.'''
++        candidates = []
++        for item in cube_list:
++            try:
++                cid = int(item[0])
++                u, v = float(item[1][0]), float(item[1][1])
++            except Exception:
++                continue
++            if not match_logic.in_scan_window(u, v):
++                continue
++            far = not match_logic.in_near_field(u, v)
++            is_cake = match_logic.is_cake(cid)
++            if far:
++                xy = match_logic.far_target_xy(self.cam.transform3d, u, v, is_cake)
++            elif is_cake:
++                xy = match_logic.pixel_to_cake_xy(
++                    self.cam.transform3d, u, v,
++                    cup_offset_x=match_logic.CAKE_CUP_OFFSET_X)
++            else:
++                dlt = match_logic.pixel_to_xy_at_z(self.cam.transform3d, u, v, -100.0)
++                xy = (float(dlt[0]) + 20.0, float(dlt[1])) if dlt is not None else None
++            if xy is None:
++                continue
++            candidates.append({
++                "mode": "cake" if is_cake else "floor",
++                "is_cake": bool(is_cake),
++                "class": cid,
++                "pixel": [u, v],
++                "xy": [float(xy[0]), float(xy[1])],
++                "z_est": None,
++                "far": far,
++            })
++        if preferred_id is not None:
++            same = [c for c in candidates if c["class"] == preferred_id]
++            if same:
++                candidates = same
++        return candidates
++
+     # Grasp floor object (Layer 1)
+     def grasp(self):
+         '''
+-        Intelligent, high-precision grasp of Layer 1 cube:
+-        1. If cube is ALREADY in arm reach workspace (X: 170..315 mm, Y: -180..180 mm):
+-           Base DOES NOT move, robot does not center, but grasps cube immediately in place!
+-        2. If cube is out of workspace reach:
+-           - In-place base rotation towards cube (horizontal centering)
+-           - Forward drive ONLY if cube is too far away (> 295 mm)
+-           - CRITICAL: 0.20s pause and RESCAN after motion to recalculate exact cube coords!
+-        3. Grasp and lift:
+-           - Heights are computed from the cube's measured 3D position
+-             (works for floor cubes and raised tiers)
+-           - Enable pump and hold vacuum (0.40s) to build strong negative pressure
+-           - Confident vertical lift upwards (+100 mm)
++        Unified Layer 1 grasp (shares geometry, far-field approach and IK guard
++        with match_logic / grasp_generic, plus SI-28 post-lift camera check):
++        1. Scan with CONF_THRESHOLD; route Cake to grasp1().
++        2. If target is far-field or outside reach envelope: align & drive bounded
++           step, then re-scan (aborts cleanly if target lost or still unreachable).
++        3. Safe lateral transit at z_approach=70 -> pump ON -> vertical descent to
++           z_touch=-58 -> dwell -> vertical lift to z_lift=60.
++        4. Software grasp check (SI-28): confirm pickup pixel is now empty; retry
++           once if the cube remained on the floor.
+         '''
+-        # 1. Primary cube detection
+-        cube_list = self.cam.detector(num_samples=6, timeout=3.0, conf_threshold=0.04)
+-        rospy.loginfo(f">> [GRASP] Cube detection: {cube_list}")
++        z_approach, z_touch, z_lift = match_logic.grasp_heights("floor")
++        initial_target_id = None
++        target = None
++        in_reach = False
++
++        for attempt in range(4):
++            cube_list = self.cam.detector(
++                num_samples=4, timeout=3.0, conf_threshold=CONF_THRESHOLD)
++            rospy.loginfo(f">> [GRASP] Scan attempt {attempt + 1}/4: {cube_list}")
++            if not cube_list:
++                rospy.logwarn(">> [GRASP] Aborted: No target cubes detected in camera view.")
++                self.grasp_status_pub.publish(String("1"))
++                return 0
++
++            candidates = self._build_floor_candidates(
++                cube_list, preferred_id=initial_target_id)
++            target = match_logic.choose_scan_target(candidates)
++            if target is None:
++                rospy.logwarn(">> [GRASP] Aborted: No valid candidate inside scan window.")
++                self.grasp_status_pub.publish(String("1"))
++                return 0
++
++            target_id = target["class"]
++            if match_logic.is_cake(target_id) and initial_target_id is None:
++                rospy.loginfo(f">> [GRASP] Target ID {target_id} is CAKE -> routing to grasp1 (Layer 2)!")
++                return self.grasp1()
++            if initial_target_id is None:
++                initial_target_id = target_id
++
++            x, y = target["xy"]
++            far = bool(target["far"])
++            in_reach, dist_to_cube = match_logic.grasp_reach_state(
++                "floor", x, y, far=far)
++            rospy.loginfo(
++                f">> [GRASP] Target ID {target_id}: px=({target['pixel'][0]:.0f}, "
++                f"{target['pixel'][1]:.0f}) -> x={x:.1f}, y={y:.1f}, dist={dist_to_cube:.1f} "
++                f"| far={far} in_reach={in_reach}")
++            if in_reach:
++                break
+ 
+-        if not cube_list:
+-            rospy.logwarn(">> [GRASP] Aborted: No target cubes detected in camera view.")
+-            self.grasp_status_pub.publish(String("1"))
+-            return 0
++            if attempt >= 3:
++                break
+ 
+-        target_cube = match_logic.select_grasp_candidate(cube_list)
+-        target_id = target_cube[0]
+-        if match_logic.is_cake(target_id):
+-            rospy.loginfo(f">> [GRASP] Target ID {target_id} is CAKE -> routing to grasp1 (Layer 2)!")
+-            return self.grasp1()
+-        initial_target_id = target_id
+-        cu = target_cube[1][0]
+-        cv = target_cube[1][1]
+-
+-        # Geometry for floor cube: top=-50 mm, cube height=100 mm -> center=-100 mm
+-        z_center = -100.0
+-        z_touch = -50.0
+-        z_above = -15.0
+-        z_lift = 60.0
+-
+-        xy = match_logic.pixel_to_xy_at_z(self.cam.transform3d, cu, cv, z_center)
+-        if xy is None:
+-            rospy.logerr(">> [GRASP] Degenerate projective mapping.")
+-            self.grasp_status_pub.publish(String("1"))
+-            return 0
+-        x = xy[0] + 20.0  # +20 mm cup center correction
+-        y = xy[1]
+-
+-        # 2. Check: is cube in comfortable reach of the arm?
+-        # Comfortable sweet-spot envelope: arm is not strained, lands dead center on cube
+-        TARGET_X = 245.0
+-        dist_to_cube = math.hypot(x, y)
+-        in_reach = (160.0 <= x <= 265.0) and (abs(y) <= 85.0) and (dist_to_cube <= 270.0)
+-        rospy.loginfo(f">> [GRASP] Target ID {target_id}: px=({cu:.0f}, {cv:.0f}) -> x={x:.1f}, y={y:.1f}, dist={dist_to_cube:.1f} | in_reach={in_reach}")
+-
+-        approach_step = 0
+-        while approach_step < 3 and not in_reach:
+-            approach_step += 1
+-            rospy.loginfo(f">> [GRASP] Cube outside sweet spot (x={x:.1f}, y={y:.1f}, dist={dist_to_cube:.1f}). Approach step #{approach_step}...")
+-
+-            # (a) Turn base towards cube center
+             angle_rad = math.atan2(y, x)
+-            if abs(angle_rad) > math.radians(2.0):
+-                rospy.loginfo(f">> [GRASP] Turning base towards cube: {math.degrees(angle_rad):.1f} deg...")
++            if abs(angle_rad) > math.radians(2.5):
++                rospy.loginfo(f">> [GRASP] Turning base towards cube: {math.degrees(angle_rad):.1f} deg")
+                 self.turn_base(angle_rad)
+-                rospy.sleep(0.3)
++                rospy.sleep(0.30)
+ 
+-            # (b) Drive forward to bring cube into sweet spot X = 245 mm
+-            drive_m = (dist_to_cube - TARGET_X) / 1000.0
++            dist, desired = match_logic.approach_target_distance("floor", x, y)
++            drive_m = (dist - desired) / 1000.0
+             if abs(drive_m) >= 0.02:
+-                step_m = max(-0.25, min(0.25, drive_m))
+-                rospy.loginfo(f">> [GRASP] Driving {step_m*100:.1f} cm to position cube at 24.5 cm...")
++                step_lim = 0.20 if far else 0.25
++                step_m = max(-step_lim, min(step_lim, drive_m))
++                rospy.loginfo(f">> [GRASP] Driving {step_m * 100:.1f} cm (far={far})")
+                 self.drive_base(step_m)
+-                rospy.sleep(0.4)
+-
+-            # (c) THEN: re-run cube position scanning algorithm!
+-            rospy.loginfo(f">> [GRASP] Re-scanning cube position after approach step #{approach_step}...")
+-            rescan_list = self.cam.detector(timeout=3.0)
+-            if rescan_list:
+-                target_cube = match_logic.select_grasp_candidate(
+-                    rescan_list, preferred_id=initial_target_id)
+-                target_id = target_cube[0]
+-                cu = target_cube[1][0]
+-                cv = target_cube[1][1]
+-                xy = match_logic.pixel_to_xy_at_z(self.cam.transform3d, cu, cv, z_center)
+-                if xy is not None:
+-                    x = xy[0] + 20.0
+-                    y = xy[1]
+-                    dist_to_cube = math.hypot(x, y)
+-                    in_reach = (160.0 <= x <= 265.0) and (abs(y) <= 85.0) and (dist_to_cube <= 270.0)
+-                    rospy.loginfo(f">> [GRASP] Re-scanned target: px=({cu:.0f}, {cv:.0f}) -> x={x:.1f}, y={y:.1f}, dist={dist_to_cube:.1f} | in_reach={in_reach}")
+-            else:
+-                break
+-
+-        # 4. Execute physical grasp
+-        x = max(120.0, min(320.0, x))
+-        y = max(-190.0, min(190.0, y))
+-        rospy.loginfo(f">> [GRASP] Executing grasp for ID {target_id}: x={x:.1f}, y={y:.1f}, z_touch={z_touch:.1f}, z_lift={z_lift:.1f}")
+-
+-        self.interface.set_status(True)
+-        rospy.sleep(0.20)
+-
+-        # Move above cube at safe height
+-        self.interface.set_pose(x, y, z_above, delay=0.9)
+-
+-        # Enable vacuum pump early for fast suction
+-        self.interface.set_pump(True)
+-        rospy.sleep(0.10)
++            rospy.sleep(0.85)
+ 
+-        # Single smooth descent straight down to the cube surface
+-        self.interface.set_pose(x, y, z_touch, delay=0.8)
++        if target is None or not in_reach:
++            rospy.logwarn(">> [GRASP] Aborted: target remained out of reach after approach.")
++            self.grasp_status_pub.publish(String("1"))
++            return 0
+ 
+-        # Vacuum dwell time for reliable suction seal
+-        rospy.sleep(0.40)
++        target_id = target["class"]
++        x, y = float(target["xy"][0]), float(target["xy"][1])
++        cu, cv = float(target["pixel"][0]), float(target["pixel"][1])
+ 
+-        # Single smooth vertical lift
+-        self.interface.set_pose(x, y, z_lift, delay=0.8)
+-        print("Cube lifted successfully")
+-        rospy.loginfo(f">> [GRASP] Cube ID {target_id} lifted successfully to height z={z_lift}")
++        if not (ik_reachable(x, y, z_touch) and ik_reachable(x, y, z_lift)):
++            rospy.logerr(f">> [GRASP] Aborted: target ({x:.1f}, {y:.1f}) failed IK check.")
++            self.grasp_status_pub.publish(String("1"))
++            return 0
+ 
+-        self.grasp_status_pub.publish(String("0"))
+-        return target_id
++        for pick_try in (1, 2):
++            rospy.loginfo(
++                f">> [GRASP] Executing pick #{pick_try} for ID {target_id}: "
++                f"x={x:.1f}, y={y:.1f}, approach={z_approach:.1f}, "
++                f"touch={z_touch:.1f}, lift={z_lift:.1f}")
++            self.interface.set_pose(140.0, y * 0.4, z_approach, delay=0.45)
++            self.interface.set_pose(x, y, z_approach, delay=0.85)
++
++            self.interface.set_pump(True)
++            rospy.sleep(0.25)
++
++            self.interface.set_pose(x, y, z_touch, delay=1.2)
++            rospy.sleep(0.45)
++
++            self.interface.set_pose(x, y, z_lift, delay=1.0)
++            rospy.sleep(0.30)
++
++            # SI-28: cheap software verification that the cube actually left the floor
++            after_cubes = self.cam.detector(
++                num_samples=2, timeout=1.5, conf_threshold=CONF_THRESHOLD)
++            if not match_logic.cube_still_present(after_cubes, (cu, cv), radius_px=40.0):
++                print("Cube lifted successfully")
++                rospy.loginfo(f">> [GRASP] Cube ID {target_id} lifted & verified (z={z_lift})")
++                self.grasp_status_pub.publish(String("0"))
++                return target_id
++
++            rospy.logwarn(f">> [GRASP] Post-lift check: cube still at ({cu:.0f}, {cv:.0f}) "
++                          f"after try #{pick_try}")
++            self.interface.set_pump(False)
++            rospy.sleep(0.25)
++
++        self.arm_grasp_ready(block=True)
++        self.grasp_status_pub.publish(String("1"))
++        return 0
+ 
+     # Grasp 2nd floor Cake (Layer 2)
+     def grasp1(self):
+         '''
+-        Intelligent, high-precision grasp of Layer 2 Cake (z_base=45):
+-        1. If Cake is ALREADY in reach: grasp immediately without rotating base.
+-        2. If out of reach: rotate, rescan after rotation for exact coordinates.
+-        3. Vacuum grasp with dwell time and vertical lift.
++        Layer 2 Cake grasp synchronized with the verified 22.11 field pipeline
++        (SI-37): dedicated affine thefile2.txt + cup_offset_x=125 mm, heights from
++        match_logic.grasp_heights("cake") -> approach=75, touch=37, lift=80.
+         '''
+-        cube_list = self.cam.detector(num_samples=6, timeout=3.0, conf_threshold=0.04)
++        cube_list = self.cam.detector(
++            num_samples=4, timeout=3.0, conf_threshold=CONF_THRESHOLD)
+         rospy.loginfo(f">> [GRASP1] Layer 2 Cake detection: {cube_list}")
+ 
+-        if len(cube_list) == 0:
++        if not cube_list:
+             rospy.logwarn(">> [GRASP1] Aborted: No layer 2 target detected in camera view.")
+             self.grasp_status_pub.publish(String("1"))
+@@ -714,7 +748,6 @@ class ArmAction:
+             cube_list, preferred_id=CAKE_ID if cake_visible else None, y_ref=250.0)
+         target_id = target_cube[0]
+-        initial_target_id = target_id
+-        u = target_cube[1][0]
+-        v = target_cube[1][1]
++        u = float(target_cube[1][0])
++        v = float(target_cube[1][1])
+         if not match_logic.is_cake(target_id):
+             rospy.logwarn(
+@@ -723,55 +756,53 @@ class ArmAction:
+                 f"({CAKE_SORTING_STATION}) and the cake detector class.")
+ 
+-        # Geometry for Layer 2 Cake: sits on Layer 1 (top at -50 mm).
+-        # Cake top surface is at z_touch ~ 40.0 mm (firm suction contact with 20 cm tier)
+-        z_center = 0.0
+-        z_touch = 40.0
+-        z_safe = 75.0    # Clears any Layer 1 front-row obstacles safely!
+-        z_lift = 85.0    # Vertical separation lift (+45 mm off pedestal, theta2=9.5 deg)
++        cake_touch_z = self._load_cake_touch_z(default=40.0)
++        z_safe, z_touch, z_lift = match_logic.grasp_heights(
++            "cake", z_est=None, cake_touch_z=cake_touch_z)
+         z_retract = 120.0
+         x_retract = 270.0
+ 
+-        # Dedicated approximation for Cake on Tier 2 (thefile2.txt +3cm forward):
+-        cake_xy = match_logic.pixel_to_cake_xy(self.cam.transform3d, u, v, cup_offset_x=30.0)
++        # Dedicated approximation for Cake on Tier 2 (thefile2.txt + verified 125 mm offset):
++        cake_xy = match_logic.pixel_to_cake_xy(
++            self.cam.transform3d, u, v,
++            cup_offset_x=match_logic.CAKE_CUP_OFFSET_X)
+         if cake_xy is None:
+             rospy.logerr(">> [GRASP1] Degenerate cake approximation.")
+             self.grasp_status_pub.publish(String("1"))
+             return 0
+-        x, y = cake_xy
+-
+-        # CRITICAL: For Cake positioned behind front-row obstacles,
+-        # base motion is strictly inhibited to avoid colliding with front-row cubes.
+-        # The manipulator reaches over the obstacle row from the stationary position.
+-        in_reach = True
+-        dist_to_cake = math.hypot(x, y)
+-        rospy.loginfo(f">> [GRASP1] Target ID {target_id}: u={u:.0f}, v={v:.0f} -> x={x:.1f}, y={y:.1f}, dist={dist_to_cake:.1f} | obstacle-guard in_reach=True")
++        x, y = float(cake_xy[0]), float(cake_xy[1])
+ 
+-        # Safe reach limits expanded specifically for Cake up to 350.0 mm
+-        x = max(120.0, min(350.0, x))
++        # Clamp inside verified hardware workspace (348 mm max x to avoid singularity)
++        x = max(120.0, min(348.0, x))
+         y = max(-190.0, min(190.0, y))
+-        rospy.loginfo(f">> [GRASP1] Executing grasp for Cake ID {target_id}: x={x:.1f}, y={y:.1f}, z_touch={z_touch:.1f}, z_lift={z_lift:.1f}")
++        dist_to_cake = math.hypot(x, y)
++        rospy.loginfo(
++            f">> [GRASP1] Target ID {target_id}: u={u:.0f}, v={v:.0f} -> "
++            f"x={x:.1f}, y={y:.1f}, dist={dist_to_cake:.1f}, "
++            f"approach={z_safe:.1f}, touch={z_touch:.1f}, lift={z_lift:.1f}")
+ 
+-        self.interface.set_status(True)
+-        rospy.sleep(0.20)
++        if not (ik_reachable(x, y, z_touch) and ik_reachable(x, y, z_lift)):
++            rospy.logerr(f">> [GRASP1] Aborted: cake pose ({x:.1f}, {y:.1f}) failed IK check.")
++            self.grasp_status_pub.publish(String("1"))
++            return 0
+ 
+-        # Move above cake at safe height (z_safe=75 mm clears any ground cube in front)
+-        self.interface.set_pose(130.0, 0.0, z_safe, delay=0.5)
+-        self.interface.set_pose(x, y, z_safe, delay=0.9)
++        # Safe lateral transit above front-row obstacles (z_safe=75 mm)
++        self.interface.set_pose(140.0, y * 0.4, z_safe, delay=0.45)
++        self.interface.set_pose(x, y, z_safe, delay=0.85)
+ 
+-        # Activate vacuum suction before descent so it draws immediately upon contact
++        # Activate vacuum suction before strictly vertical descent
+         self.interface.set_pump(True)
+-        rospy.sleep(0.30)
+-        self.interface.set_pose(x, y, z_touch, delay=0.9)
+-        rospy.sleep(0.60)
++        rospy.sleep(0.25)
++        self.interface.set_pose(x, y, z_touch, delay=1.4)
++        rospy.sleep(0.45)
+ 
+         print("Layer 2 Cake lifted successfully")
+-        # Stage 1: Vertical separation off pedestal
+-        self.interface.set_pose(x, y, z_lift, delay=0.8)
+-        rospy.sleep(0.50)
+-        # Stage 2: Pull cake inward to secure position and reduce torque
++        # Stage 1: Strictly vertical separation off pedestal
++        self.interface.set_pose(x, y, z_lift, delay=1.0)
++        rospy.sleep(0.35)
++        # Stage 2: Pull cake inward to reduce torque during transit
+         self.interface.set_pose(x_retract, y, z_retract, delay=0.8)
+-        rospy.sleep(0.50)
++        rospy.sleep(0.35)
+ 
+-        rospy.loginfo(f">> [GRASP1] Layer 2 Cake ID {target_id} lifted and secured successfully to height z={z_retract}")
++        rospy.loginfo(f">> [GRASP1] Layer 2 Cake ID {target_id} lifted and secured (z={z_retract})")
+ 
+         self.grasp_status_pub.publish(String("0"))
+@@ -807,9 +838,10 @@ class ArmAction:
+         return True
+ 
+-    def _tower_xy(self, x_kb, y_kb, fallback=(235.0, 0.0)):
++    def _tower_xy(self, z_center=-100.0, z_drop=60.0, fallback=(235.0, 0.0)):
+         '''
+-        (x, y) of the cube already standing in the drop zone, used to align the
+-        stacking tower.  Falls back to the calibrated default point when the
+-        camera sees nothing (SI-12: never index an empty detection list).
++        (x, y) of the cube already standing in the drop zone via the calibrated
++        DLT matrix (replaces the stale 2D thefile.txt mapping).  Falls back to
++        ``fallback`` when no cube is visible or the projection is unreachable
++        (SI-12: never index an empty detection list).
+         '''
+         cube = match_logic.select_grasp_candidate(self.cam.detector(timeout=3.0))
+@@ -818,17 +850,25 @@ class ArmAction:
+                           "stacking on the default point.")
+             return fallback
+-        u, v = cube[1][0], cube[1][1]
+-        # row (v) drives arm x, column (u) drives arm y - see arm_ik.py.
+-        return match_logic.pixel_to_arm(v, u, x_kb, y_kb)
++        u, v = float(cube[1][0]), float(cube[1][1])
++        xy = match_logic.pixel_to_xy_at_z(self.cam.transform3d, u, v, z_center)
++        if xy is None:
++            return fallback
++        x = float(xy[0]) + 20.0
++        y = float(xy[1])
++        if not ik_reachable(x, y, z_drop):
++            rospy.logwarn(f">> [DROP] Projected tower ({x:.1f}, {y:.1f}) unreachable at z={z_drop}; using fallback.")
++            return fallback
++        return x, y
+ 
+     def drop1(self, check=False):
+         '''
+-        Place block, layer 2 height
++        Place block, layer 2 height (vertical approach above tier-1 cube).
+         '''
+-        x, y = self._tower_xy(self.x_kb, self.y_kb)
+-        z = 60
++        z = 60.0
++        x, y = self._tower_xy(z_center=-100.0, z_drop=z)
+ 
+-        # Position arm above placed cube
+-        self.interface.set_pose(x, y, z, delay=0.40)
++        # Safe vertical approach above the tower before lowering
++        self.interface.set_pose(x, y, min(z + 50.0, 175.0), delay=0.45)
++        self.interface.set_pose(x, y, z, delay=0.45)
+ 
+         # Disable vacuum pump and wait for vacuum relief
+@@ -837,5 +877,5 @@ class ArmAction:
+ 
+         # Vertical retract upwards
+-        self.interface.set_pose(x, y, 140, delay=0.35)
++        self.interface.set_pose(x, y, 140.0, delay=0.35)
+ 
+         self.arm_grasp_ready(block=False)
+@@ -845,15 +885,16 @@ class ArmAction:
+     def drop2(self, check=False):
+         '''
+-        Place block, layer 3 height
++        Place block, layer 3 height (vertical approach above tier-2 cube).
+         '''
+-        x, y = self._tower_xy(self.x_kb1, self.y_kb1)
+-        z = 160
++        z = 160.0
++        x, y = self._tower_xy(z_center=0.0, z_drop=z)
+ 
+-        self.interface.set_pose(x, y, z, delay=0.40)
++        self.interface.set_pose(x, y, min(z + 20.0, 180.0), delay=0.45)
++        self.interface.set_pose(x, y, z, delay=0.45)
+ 
+         self.interface.set_pump(0)
+         rospy.sleep(0.25)
+ 
+-        self.interface.set_pose(x, y, z + 20, delay=0.30)
++        self.interface.set_pose(x, y, min(z + 20.0, 180.0), delay=0.30)
+ 
+         self.arm_grasp_ready(block=False)
+@@ -1043,4 +1084,7 @@ class RobotMoveAction:
+         self.goto_local_pub = rospy.Publisher(
+             "mark_nav", String, queue_size=1)
++        # Pre-create cancel publisher so TCPROS handshake finishes before any timeout
++        self.cancel_pub = rospy.Publisher(
++            "move_base/cancel", GoalID, queue_size=1)
+ 
+ 
+@@ -1065,5 +1109,5 @@ class RobotMoveAction:
+         # 如果一分钟之内没有到达，放弃目标
+         if ret_status != GoalStatus.SUCCEEDED:
+-            rospy.Publisher("move_base/cancel", GoalID, queue_size=1).publish(
++            self.cancel_pub.publish(
+                 GoalID(stamp=rospy.Time.from_sec(0.0), id=""))
+             try:
+@@ -1099,5 +1143,5 @@ class RobotMoveAction:
+         # 如果一分钟之内没有到达，放弃目标
+         if ret_status != GoalStatus.SUCCEEDED:
+-            rospy.Publisher("move_base/cancel", GoalID, queue_size=1).publish(
++            self.cancel_pub.publish(
+                 GoalID(stamp=rospy.Time.from_sec(0.0), id=""))
+             try:
+@@ -1192,7 +1236,8 @@ class AutoAction:
+         # do not move the manipulator unnecessarily before every run.
+         calib_flag = "/tmp/arm_calib_done"
++        calib_stale = bool(getattr(self.cam, "calib_meta_stale", False))
+         if (self.arm is not None and not self.init_errors
+                 and os.environ.get("SPARK_CALIB_CHECK", "1") != "0"
+-                and not os.path.exists(calib_flag)):
++                and (calib_stale or not os.path.exists(calib_flag))):
+             try:
+                 calib_ok, calib_detail = self.arm.verify_calibration()
+@@ -1450,5 +1495,5 @@ class AutoAction:
+             if delivered_zone:
+                 last_zone = delivered_zone
+-            total_drop_times += 1
++                total_drop_times += 1
+             empty_attempts[station] = 0
+             stations[station] = max(0, stations.get(station, 1) - 1)
+@@ -1494,12 +1539,18 @@ class AutoAction:
+                 if item_id not in match_logic.BOARD_ITEMS or score < CONF_THRESHOLD:
+                     continue
+-                objs.append((item_id, obj.bbox.center.x))
++                objs.append((item_id, float(obj.bbox.center.x), score))
++
++            # Collapse duplicate detections (e.g. *_site aliases) at the same card x
++            deduped = []
++            for item_id, cx, score in sorted(objs, key=lambda t: -t[2]):
++                if not any(abs(cx - kept[1]) < 45.0 for kept in deduped):
++                    deduped.append((item_id, cx, score))
+ 
+-            if len(objs) < slots:
++            if len(deduped) < slots:
+                 continue
+ 
+-            objs.sort(key=lambda pair: pair[1])
++            deduped.sort(key=lambda t: t[1])
+             for slot in range(slots):
+-                slot_votes[slot].append(objs[slot][0])
++                slot_votes[slot].append(deduped[slot][0])
+             collected += 1
+ 

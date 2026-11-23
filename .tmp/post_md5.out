@@ -1,0 +1,12 @@
+c33322da8df847d24b0353b98ea7b03a  /home/spark/codes/match_logic.py
+96e490137bf86ab3a34db92f5ada1c69  /home/spark/codes/runtask.py
+057c5a6b8c1d08c5ce64b52ac821a841  /home/spark/codes/grasp_generic.py
+e90e1617a3c3db79dff09c979db3f3f3  /home/spark/codes/detect_ros.py
+98725eefe083564bafd1bb9e17cd3421  /home/spark/codes/pad_detect.py
+e01067d9249a720e24257d2ab724031b  /home/spark/codes/robot_view.py
+734c17977ca8db986357da1aee34a324  /home/spark/codes/run_grasp_test.sh
+4a15738d875798db90b6f94f76055a9b  /home/spark/codes/patch_swiftpro.py
+36c6814cf1c207cb9d36fdd5204324b3  /home/spark/codes/snap.py
+c33322da8df847d24b0353b98ea7b03a  /home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/match_logic.py
+e90e1617a3c3db79dff09c979db3f3f3  /home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/detect_ros.py
+98725eefe083564bafd1bb9e17cd3421  /home/spark/spark_noetic/src/3rd_app/auto_match_25/auto_match/nodes/pad_detect.py
