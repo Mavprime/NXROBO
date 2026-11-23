@@ -6,22 +6,25 @@ Base (hold for continuous motion - terminal key repeat):
     w  forward          s  backward
     a  turn left        d  turn right
 
-Arm (10 degrees per press, slew-limited so it moves smoothly):
+Arm (ramped joint jogging at a tip speed up to ARM_JOG_SPEED, plus combos):
     4  base rotate left          6  base rotate right
     7  raise upper arm           9  lower upper arm
     8  extend forearm            2  fold forearm
+    q  7 + 8    e  7 + 2    z  9 + 8    c  9 + 2
 
 Other:
-    Enter  toggle the vacuum pump: suck on the first press, release on the next
-    0      release the pump and send the arm to its home pose
+    Enter  toggle the vacuum pump and lift straight up when switching it on
+    Space  cancel the lift with the pump still on
+    m      re-attach the arm motors
+    0      release the pump, stop the base, and send the arm to its home pose
     Ctrl+C stop everything (base stopped, pump off)
 
 How the arm works
 -----------------
 The driver only accepts a Cartesian pose on /position_write_topic
-(swiftpro/position x,y,z in mm). There is no joint-angle topic. So this script keeps the three motor angles locally and
-converts them to x,y,z with the same forward kinematics as the robot's
-swiftpro_moveit_node.cpp:
+(swiftpro/position x,y,z in mm). There is no joint-angle topic. So this script
+keeps the three motor angles locally and converts them to x,y,z with the same
+forward kinematics as the robot's swiftpro_moveit_node.cpp:
 
     stretch = LOWER*cos(a1) + UPPER*cos(a2) + L2 + 56.55
     height  = LOWER*sin(a1) - UPPER*sin(a2) + L1
@@ -30,22 +33,66 @@ swiftpro_moveit_node.cpp:
 where a0 = base yaw, a1 = shoulder, a2 = elbow, all in degrees. At the home
 pose (120, 0, 35) mm the inverse gives about (90, 103.4, 58.4) degrees.
 
-The key signs were chosen so that from home:
-    4/6 move the base counter-clockwise/clockwise (left/right),
-    7 decreases a1 and raises the arm, 9 increases a1 and lowers it,
-    8 decreases a2 and extends the forearm, 2 increases a2 and folds it.
-From a very different arm pose the visual direction can differ; press 0 to
-return to the known home pose.
+Motion
+------
+A pressed arm key is held as a direction, and the control loop advances the tip
+every tick (20 Hz) at a ramped speed up to ARM_JOG_SPEED, easing near the
+relevant joint limit. Motion therefore starts immediately instead of waiting
+for the terminal's key-repeat delay, and a quick tap still moves for
+TAP_MIN_DURATION. Kitty terminals report the exact release; plain terminals
+renew the hold for PLAIN_HOLD_TIMEOUT on every repeat byte. Queued repeats are
+discarded rather than replayed, and an idle loop never sends a jog.
+The base is ramped the same way by LIN_SPEED/ANG_SPEED and the MAX_* limits.
 
-Each press adds JOINT_STEP degrees to the target. The control loop moves the
-joint toward that target at JOINT_SPEED deg/s, so a 10 degree press takes about
-0.17 s at the default speed instead of jumping. Holding a key (terminal key
-repeat) keeps adding steps; letting go stops the arm after ARM_TIMEOUT.
+Base keys use the same tracking, so w/a/s/d can stay held while 4/6/7/9/8/2
+are held: the base target and the arm jog are recomputed together every tick.
+w/s use the long forward pulse (TERM_FIRST_REPEAT), while a/d use a short pulse
+(TURN_TAP_MIN) and a lower ANG_SPEED, so one a/d tap only rotates a few degrees
+instead of a large angle.
+
+Terminals that support Kitty key events report each press and release, so held
+keys stay independent. The Q/E/Z/C shortcuts work in ordinary SSH terminals
+too. A plain SSH terminal repeats only the most recently pressed key, so a
+fresh key coasts for its tap window and a repeating one for
+TERM_REPEAT_TIMEOUT; re-tap the base key if you want to turn for longer while
+another key is repeating.
+
+Turning the pump on lifts as high as the arm can go at its current X and Y.
+A movement key, Space, or turning the pump off cancels the remaining lift.
+The re-attach key here is `m` because `a` is base turn-left; arm.py uses `a`.
+
+Limits
+------
+A pose is accepted only if ALL of these hold (see check_pose()):
+  * each joint is inside its own range (A0/A1/A2_LIMITS)
+  * shoulder + elbow <= 180 - MIN_ELBOW_ANGLE. Past 180 the driver's inverse
+    kinematics picks the OTHER elbow configuration for the same x,y,z, so the
+    real arm would flip while this script believed it was moving smoothly.
+  * radial reach <= MAX_REACH (a circle around the base, so the base can swing
+    freely at any extension) and z inside Z_LIMITS
+  * the driver's IK returns exactly the joint angles we think we are at
+  * (optional) arm_ik.ik_reachable() agrees, if arm_ik.py is next to this file
+
+Arm state / first run
+---------------------
+At power-on the arm motors are DETACHED: the driver accepts poses and reports
+them on /SwiftproState_topic, but nothing physically moves until the attach
+sequence runs (as in the M-Robots grasp code):
+
+    /swiftpro_status_topic:  0  -> M2019 (detach)   1 -> M17 (attach)
+
+This script sends that 0 -> 1 pair on startup and again whenever you press m.
+If the arm "accepts" keys but never moves, press m to re-attach.
+
+The script saves its last commanded pose in .arm_last_pose (next to this file)
+and resumes from it on the next run. On a first run without a valid starting
+pose, press 0 once to home the arm and create the saved pose.
 
 Prerequisites
 -------------
     base: roslaunch spark_bringup driver_bringup.launch camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6
     arm:  roslaunch swiftpro pro_control_nomoveit.launch
+         (or: roslaunch ~/semi/server.launch)
 
 Usage
 -----
@@ -54,104 +101,166 @@ Usage
     python3 ~/semi/key_fullbody.py
     python3 ~/semi/key_fullbody.py --check-kinematics   # no ROS needed
 
-Environment overrides
----------------------
-    LIN_SPEED=0.15      m/s
-    ANG_SPEED=0.6       rad/s
-    KEY_TIMEOUT=0.25    release timeout once the key-repeat stream is running
-    HOLD_GRACE=0.7      timeout after a fresh press, before the first key repeat
-                        arrives (the terminal's repeat delay is usually ~0.5 s)
-    MAX_LIN_ACCEL=3.0   m/s^2 base acceleration
-    MAX_LIN_DECEL=3.0   m/s^2 base braking when the key is released
-    MAX_ANG_ACCEL=6.0   rad/s^2 turning acceleration
-    MAX_ANG_DECEL=6.0   rad/s^2 turning braking
-    JOINT_STEP=10       degrees added per arm key press
-    JOINT_SPEED=60      deg/s slew rate for the arm
-    ARM_TIMEOUT=0.3     seconds after the last arm key before the target is dropped
-    MAX_LEAD=30         max degrees the target may run ahead of the arm
-    ARM_PERIOD=0.05     seconds between pose publications
-
-Topic summary
--------------
-    /cmd_vel              geometry_msgs/Twist       base
-    /position_write_topic swiftpro/position         arm x,y,z (mm)
-    /pump_topic           swiftpro/status           vacuum 1/0
-    /SwiftproState_topic  swiftpro/SwiftproState    last commanded pose
-
-Safety
-------
-The arm moves immediately when a command is published. Keep hands, cables and
-the field clear. Press 0 before the first arm move so the script's joint state
-is synced with the physical arm. If this process is SIGKILLed while the pump is
-on, the vacuum stays on; use Ctrl+C or press 0.
+Environment overrides:
+    LIN_SPEED=0.45             m/s
+    ANG_SPEED=0.5              rad/s
+    MAX_LIN_ACCEL=2.0          m/s^2
+    MAX_LIN_DECEL=4.0          m/s^2
+    MAX_ANG_ACCEL=6.0          rad/s^2
+    MAX_ANG_DECEL=10.0         rad/s^2
+    TERM_FIRST_REPEAT=0.95     s a fresh w/s key is held before release
+    TERM_REPEAT_TIMEOUT=0.32   s between repeats before the base is released
+    TURN_TAP_MIN=0.20          s a quick a/d tap rotates (keeps taps small)
+    TURN_HOLD_TIMEOUT=0.35     s a plain a/d byte keeps turning (no repeats)
+    TERM_REARM_PAUSE=0.90      s quiet time before movement re-arms after 0
+    TERM_ACTION_GAP=0.90       s minimum gap between repeated Enter/0/m presses
+    JOINT_STEP=10              upper bound on an arm joint step in degrees
+    BASE_YAW_STEP=6            additional upper bound on a yaw step in degrees
+    BASE_YAW_SPEED=120         upper bound on commanded yaw speed in deg/s
+    ARM_JOG_SPEED=120          maximum commanded tip speed for jogs in mm/s
+    PUMP_LIFT_DELAY=0.35       seconds to wait after turning the pump on
+    BASE_YAW_MIN=5             set higher if this arm stops earlier at the low end
+    BASE_YAW_MAX=175           set lower if this arm stops earlier at the high end
+    MIN_ELBOW_ANGLE=10         keep the elbow at least this far from fully folded
+    MAX_REACH=350              max radial distance of the tip from the base axis, mm
 """
 
 import math
 import os
+import re
 import select
 import sys
 import termios
+import threading
 import time
 import tty
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from arm_ik import ik_reachable as _arm_ik_reachable
+except Exception:
+    _arm_ik_reachable = None
+
 # ---------------------------------------------------------------------------
-# Arm model - constants copied from swiftpro_moveit_node.cpp and
-# swiftpro_rviz_node.cpp on the robot.
+# Arm model - constants from swiftpro_moveit_node.cpp / swiftpro_rviz_node.cpp
 # ---------------------------------------------------------------------------
-MATH_L1 = 106.6             # shoulder height offset, mm
-MATH_L2 = 13.2              # base link offset, mm
-MATH_LOWER_ARM = 142.07     # first link length, mm
-MATH_UPPER_ARM = 158.81     # second link length, mm
-MATH_Z_OFFSET = 74.55       # z offset used by the driver IK
+MATH_L1 = 106.6
+MATH_L2 = 13.2
+MATH_LOWER_ARM = 142.07
+MATH_UPPER_ARM = 158.81
+MATH_Z_OFFSET = 74.55
 MATH_BASE_OFFSET = MATH_L2 + 56.55
 
-HOME = (120.0, 0.0, 35.0)   # home pose, mm (same as keyboard_teleop.py)
+HOME = (120.0, 0.0, 35.0)
 
-# Conservative joint limits.  a1/a2 maxima come from the arm model constants;
-# the base is kept in the front half-plane to avoid the sin(a0)=0 singularity.
-A0_LIMITS = (5.0, 175.0)      # base yaw, degrees
-A1_LIMITS = (0.0, 135.6)      # shoulder, degrees
-A2_LIMITS = (0.0, 100.7)      # elbow, degrees
+A0_LIMITS = (
+    float(os.environ.get("BASE_YAW_MIN", "5")),
+    float(os.environ.get("BASE_YAW_MAX", "175")),
+)
+if not (5.0 <= A0_LIMITS[0] <= 90.0 <= A0_LIMITS[1] <= 175.0 and A0_LIMITS[0] < A0_LIMITS[1]):
+    sys.exit("Base yaw limits must be within 5..175 degrees and include home (90 degrees).")
+
+A1_LIMITS = (0.0, 135.6)
+A2_LIMITS = (0.0, 100.7)
 JOINT_LIMITS = (A0_LIMITS, A1_LIMITS, A2_LIMITS)
+JOINT_NAMES = ("base", "shoulder", "elbow")
 
-# Cartesian safety box (same spirit as keyboard_teleop.py).
-CART_LIMITS = {"x": (0.0, 350.0), "y": (-160.0, 160.0), "z": (-60.0, 170.0)}
+MAX_REACH = float(os.environ.get("MAX_REACH", "350"))
+Z_LIMITS = (-60.0, 170.0)
+MIN_ELBOW_ANGLE = float(os.environ.get("MIN_ELBOW_ANGLE", "10"))
+FOLD_MAX = 180.0 - MIN_ELBOW_ANGLE
+POSE_EPSILON = 1e-9
 
-LIN_SPEED = float(os.environ.get("LIN_SPEED", "0.15"))       # m/s
-ANG_SPEED = float(os.environ.get("ANG_SPEED", "0.6"))        # rad/s
-KEY_TIMEOUT = float(os.environ.get("KEY_TIMEOUT", "0.25"))   # s
-HOLD_GRACE = float(os.environ.get("HOLD_GRACE", "0.7"))      # s
-MAX_LIN_ACCEL = float(os.environ.get("MAX_LIN_ACCEL", "3.0"))  # m/s^2
-MAX_LIN_DECEL = float(os.environ.get("MAX_LIN_DECEL", "3.0"))  # m/s^2
-MAX_ANG_ACCEL = float(os.environ.get("MAX_ANG_ACCEL", "6.0"))  # rad/s^2
-MAX_ANG_DECEL = float(os.environ.get("MAX_ANG_DECEL", "6.0"))  # rad/s^2
-JOINT_STEP = float(os.environ.get("JOINT_STEP", "10"))       # deg / press
-JOINT_SPEED = float(os.environ.get("JOINT_SPEED", "60"))     # deg / s
-ARM_TIMEOUT = float(os.environ.get("ARM_TIMEOUT", "0.3"))    # s
-MAX_LEAD = float(os.environ.get("MAX_LEAD", "30"))           # deg
-ARM_PERIOD = float(os.environ.get("ARM_PERIOD", "0.05"))     # s
+# Base ramping.
+LIN_SPEED = float(os.environ.get("LIN_SPEED", "0.45"))
+ANG_SPEED = float(os.environ.get("ANG_SPEED", "0.5"))
+MAX_LIN_ACCEL = float(os.environ.get("MAX_LIN_ACCEL", "2.0"))
+MAX_LIN_DECEL = float(os.environ.get("MAX_LIN_DECEL", "4.0"))
+MAX_ANG_ACCEL = float(os.environ.get("MAX_ANG_ACCEL", "6.0"))
+MAX_ANG_DECEL = float(os.environ.get("MAX_ANG_DECEL", "10.0"))
+
+TERM_FIRST_REPEAT = float(os.environ.get("TERM_FIRST_REPEAT", "0.95"))
+TERM_REPEAT_TIMEOUT = float(os.environ.get("TERM_REPEAT_TIMEOUT", "0.32"))
+# a/d turn in short pulses so one tap is only a few degrees.
+TURN_TAP_MIN = float(os.environ.get("TURN_TAP_MIN", "0.20"))
+TURN_HOLD_TIMEOUT = float(os.environ.get("TURN_HOLD_TIMEOUT", "0.35"))
+TERM_REARM_PAUSE = float(os.environ.get("TERM_REARM_PAUSE", "0.90"))
+TERM_ACTION_GAP = float(os.environ.get("TERM_ACTION_GAP", "0.90"))
+
+# Arm jogging - same tuning as arm.py.
+JOINT_STEP = float(os.environ.get("JOINT_STEP", "10"))
+if not (math.isfinite(JOINT_STEP) and JOINT_STEP > 0.0):
+    sys.exit("Joint step must be a finite positive number of degrees.")
+
+BASE_YAW_STEP = float(os.environ.get("BASE_YAW_STEP", "6"))
+if not (math.isfinite(BASE_YAW_STEP) and BASE_YAW_STEP > 0.0):
+    sys.exit("Base yaw step must be a finite positive number of degrees.")
+BASE_YAW_STEP = min(BASE_YAW_STEP, JOINT_STEP)
+
+BASE_YAW_SPEED = float(os.environ.get("BASE_YAW_SPEED", "120"))
+if not (math.isfinite(BASE_YAW_SPEED) and BASE_YAW_SPEED > 0.0):
+    sys.exit("Base yaw speed must be a finite positive number of degrees per second.")
+
+ARM_JOG_SPEED = float(os.environ.get("ARM_JOG_SPEED", "120"))
+if not (math.isfinite(ARM_JOG_SPEED) and ARM_JOG_SPEED > 0.0):
+    sys.exit("Arm jog speed must be a finite positive number of mm/s.")
+
+PUMP_LIFT_DELAY = float(os.environ.get("PUMP_LIFT_DELAY", "0.35"))
+if not (math.isfinite(PUMP_LIFT_DELAY) and PUMP_LIFT_DELAY >= 0.0):
+    sys.exit("Pump lift delay must be a finite, nonnegative number of seconds.")
+
+JOG_ACCEL = 1200.0              # mm/s^2
+JOG_PERIOD = 0.05               # SwiftPro processes targets at 20 Hz
+JOG_MAX_INTERVAL = 0.07         # cap stride when repeats arrive slowly
+JOG_RESTART_GAP = 0.14          # reset acceleration between separate presses
+TAP_MIN_DURATION = 0.18         # s a quick tap keeps moving (never a dead press)
+PLAIN_HOLD_TIMEOUT = 0.22       # s a byte keeps its key held (no release events)
+HELD_MAX_DURATION = 5.0         # s safety cap if a release event never arrives
+MIN_MOVE = 0.2                  # deg, ignore smaller partial moves
+
+JOG_KEYS = {
+    "4": (0, +1),  # base left
+    "6": (0, -1),  # base right
+    "7": (1, -1),  # shoulder raise
+    "9": (1, +1),  # shoulder lower
+    "8": (2, -1),  # elbow extend
+    "2": (2, +1),  # elbow fold
+}
+REVERSE_KEY = {"4": "6", "6": "4", "7": "9", "9": "7", "8": "2", "2": "8"}
+COMBO_KEYS = {"q": "78", "e": "72", "z": "98", "c": "92"}
+BASE_KEYS = "wasd"
+ATTACH_KEY = "m"
+# Ctrl+C and the action keys, plus the keys forwarded to the base and arm.
+CONTROL_KEYS = "\x03" + ATTACH_KEY + "0\r\n " + BASE_KEYS
+ACCEPTED_KEYS = set(JOG_KEYS) | set(COMBO_KEYS) | set(CONTROL_KEYS)
+KITTY_KEY = re.compile(rb"(\d+)(?::[\d:]*)?(?:;(\d+)(?::([123]))?)?(?:;[\d:]*)?u")
+CSI_END = re.compile(rb"[\x40-\x7e]")
+
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".arm_last_pose")
 
 
 def fk(a0, a1, a2):
     """Motor angles (degrees) -> Cartesian pose (mm)."""
     r0, r1, r2 = math.radians(a0), math.radians(a1), math.radians(a2)
-    stretch = (MATH_LOWER_ARM * math.cos(r1)
-               + MATH_UPPER_ARM * math.cos(r2)
-               + MATH_BASE_OFFSET)
-    height = (MATH_LOWER_ARM * math.sin(r1)
-              - MATH_UPPER_ARM * math.sin(r2)
-              + MATH_L1)
-    return (stretch * math.sin(r0),
-            -stretch * math.cos(r0),
-            height - MATH_Z_OFFSET)
+    stretch = (
+        MATH_LOWER_ARM * math.cos(r1)
+        + MATH_UPPER_ARM * math.cos(r2)
+        + MATH_BASE_OFFSET
+    )
+    height = (
+        MATH_LOWER_ARM * math.sin(r1)
+        - MATH_UPPER_ARM * math.sin(r2)
+        + MATH_L1
+    )
+    return (
+        stretch * math.sin(r0),
+        -stretch * math.cos(r0),
+        height - MATH_Z_OFFSET,
+    )
 
 
 def ik(x, y, z):
-    """Cartesian pose (mm) -> motor angles (degrees), or None if unreachable.
-
-    This is the exact inverse of fk(). It selects the elbow configuration the
-    robot uses (the same branch as swiftpro_rviz_node.cpp).
-    """
+    """Cartesian pose (mm) -> motor angles (degrees), or None if unreachable."""
     a0 = math.degrees(math.atan2(x, -y))
     stretch = math.hypot(x, y)
     x_in = stretch - MATH_BASE_OFFSET
@@ -160,22 +269,110 @@ def ik(x, y, z):
     if d < 1e-6:
         return None
 
-    cos_delta = ((d * d - MATH_LOWER_ARM ** 2 - MATH_UPPER_ARM ** 2)
-                 / (2.0 * MATH_LOWER_ARM * MATH_UPPER_ARM))
+    cos_delta = (
+        (d * d - MATH_LOWER_ARM ** 2 - MATH_UPPER_ARM ** 2)
+        / (2.0 * MATH_LOWER_ARM * MATH_UPPER_ARM)
+    )
     if cos_delta < -1.0 - 1e-9 or cos_delta > 1.0 + 1e-9:
         return None
+
     delta = -math.acos(max(-1.0, min(1.0, cos_delta)))
     phi = math.atan2(z_in, x_in)
-    a1 = phi - math.atan2(MATH_UPPER_ARM * math.sin(delta),
-                          MATH_LOWER_ARM + MATH_UPPER_ARM * math.cos(delta))
+    a1 = phi - math.atan2(
+        MATH_UPPER_ARM * math.sin(delta),
+        MATH_LOWER_ARM + MATH_UPPER_ARM * math.cos(delta),
+    )
     return (a0, math.degrees(a1), math.degrees(-(a1 + delta)))
 
 
 HOME_JOINTS = ik(*HOME) or (90.0, 103.4, 58.4)
 
 
+def distance(a, b):
+    return math.sqrt(sum((left - right) ** 2 for left, right in zip(a, b)))
+
+
+def furthest_valid(lo, hi, allowed):
+    """Binary search boundary between an allowed value and a rejected value."""
+    for _ in range(14):
+        mid = (lo + hi) * 0.5
+        if allowed(mid):
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
+def check_pose(joints):
+    """Return reason string if joints violate safety/kinematic limits, else None."""
+    for value, (lo, hi), name in zip(joints, JOINT_LIMITS, JOINT_NAMES):
+        if value < lo - POSE_EPSILON or value > hi + POSE_EPSILON:
+            return "%s joint limit (%.1f..%.1f deg)" % (name, lo, hi)
+
+    if joints[1] + joints[2] > FOLD_MAX + 1e-9:
+        return (
+            "elbow folded too far (shoulder+elbow %.0f > %.0f deg)"
+            % (joints[1] + joints[2], FOLD_MAX)
+        )
+
+    x, y, z = fk(*joints)
+    reach = math.hypot(x, y)
+    if reach > MAX_REACH + POSE_EPSILON:
+        return "reach %.0f mm > %.0f mm" % (reach, MAX_REACH)
+    if not (Z_LIMITS[0] - POSE_EPSILON <= z <= Z_LIMITS[1] + POSE_EPSILON):
+        return "height z=%.0f mm outside %.0f..%.0f" % (z, Z_LIMITS[0], Z_LIMITS[1])
+
+    back = ik(x, y, z)
+    if back is None or max(abs(p - q) for p, q in zip(joints, back)) > 0.05:
+        return "driver IK would pick a different arm configuration"
+
+    if _arm_ik_reachable is not None:
+        try:
+            ok = _arm_ik_reachable(x, y, z)
+        except Exception:
+            ok = False
+        if not ok:
+            return "arm_ik.ik_reachable() rejected the pose"
+    return None
+
+
+def validated_pose_joints(x, y, z):
+    """Validate a saved or echoed Cartesian pose into joint angles."""
+    joints = ik(x, y, z)
+    if joints is None:
+        return None
+    bounded = tuple(
+        max(lo, min(hi, value))
+        for value, (lo, hi) in zip(joints, JOINT_LIMITS)
+    )
+    if joints != bounded and distance((x, y, z), fk(*bounded)) <= 0.001:
+        joints = bounded
+    return joints if check_pose(joints) is None else None
+
+
+def save_pose(x, y, z):
+    """Persist the last commanded Cartesian pose."""
+    try:
+        tmp = STATE_FILE + ".tmp"
+        with open(tmp, "w") as handle:
+            handle.write("%.3f %.3f %.3f\n" % (x, y, z))
+        os.replace(tmp, STATE_FILE)
+    except OSError:
+        pass
+
+
+def load_saved_pose():
+    """Load joints from the last saved pose if valid."""
+    try:
+        with open(STATE_FILE) as handle:
+            x, y, z = [float(value) for value in handle.read().split()]
+    except (OSError, ValueError):
+        return None
+    return validated_pose_joints(x, y, z)
+
+
 def _check_kinematics():
-    """Self-check: fk(ik(p)) == p and ik(fk(a)) == a."""
+    """Self-check FK/IK round trips and pose validation without ROS."""
     ok = True
     cart_points = [HOME, (200.0, 0.0, 20.0), (250.0, 100.0, 50.0), (180.0, -80.0, 80.0)]
     for p in cart_points:
@@ -185,9 +382,11 @@ def _check_kinematics():
             ok = False
             continue
         q = fk(*joints)
-        err = math.sqrt(sum((a - b) ** 2 for a, b in zip(p, q)))
-        print("IK/FK %s -> (%0.2f, %0.2f, %0.2f) -> err %.4f mm"
-              % (p, joints[0], joints[1], joints[2], err))
+        err = distance(p, q)
+        print(
+            "IK/FK %s -> (%0.2f, %0.2f, %0.2f) -> err %.4f mm"
+            % (p, joints[0], joints[1], joints[2], err)
+        )
         if err > 0.01:
             ok = False
 
@@ -200,11 +399,36 @@ def _check_kinematics():
             ok = False
             continue
         err = max(abs(x - y) for x, y in zip(a, b))
-        print("FK/IK %s -> (%0.2f, %0.2f, %0.2f) -> err %.4f deg"
-              % (a, b[0], b[1], b[2], err))
+        print(
+            "FK/IK %s -> (%0.2f, %0.2f, %0.2f) -> err %.4f deg"
+            % (a, b[0], b[1], b[2], err)
+        )
         if err > 0.01:
             ok = False
 
+    reason = check_pose(HOME_JOINTS)
+    print("home pose accepted by check_pose: %s" % ("yes" if reason is None else "NO - " + reason))
+    if reason is not None:
+        ok = False
+
+    accepted = mismatched = 0
+    for i in range(35):
+        a0 = A0_LIMITS[0] + (A0_LIMITS[1] - A0_LIMITS[0]) * i / 34.0
+        for j in range(60):
+            a1 = A1_LIMITS[0] + (A1_LIMITS[1] - A1_LIMITS[0]) * j / 59.0
+            for k in range(45):
+                a2 = A2_LIMITS[0] + (A2_LIMITS[1] - A2_LIMITS[0]) * k / 44.0
+                joints = (a0, a1, a2)
+                if check_pose(joints) is not None:
+                    continue
+                accepted += 1
+                back = ik(*fk(*joints))
+                if back is None or max(abs(p - q) for p, q in zip(joints, back)) > 0.05:
+                    mismatched += 1
+
+    print("accepted poses: %d, with IK mismatch: %d" % (accepted, mismatched))
+    if mismatched:
+        ok = False
     print("kinematics OK" if ok else "kinematics FAILED")
     return ok
 
@@ -216,192 +440,447 @@ import rospy
 from geometry_msgs.msg import Twist
 from swiftpro.msg import SwiftproState, position, status
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from arm_ik import ik_reachable
-
 HELP = """
   Base:  w forward   s backward   a turn left   d turn right   (hold)
   Arm:   4 base left   6 base right
          7 upper arm up   9 upper arm down
-         8 extend forearm  2 fold forearm        (10 deg per press)
-  Enter: vacuum ON/OFF       0: release + arm home       Ctrl+C: stop
+         8 extend forearm  2 fold forearm        (jog tip speed up to %g mm/s)
+  Combo: q = 7+8   e = 7+2   z = 9+8   c = 9+2
+  Other: Enter pump ON + lift / OFF   Space cancel lift
+         m re-attach arm   0 release + home   Ctrl+C stop all
 """
 
 
-def pose_ok(x, y, z):
-    """True if a Cartesian pose is inside the safety box and arm-reachable."""
-    if not (CART_LIMITS["x"][0] <= x <= CART_LIMITS["x"][1]):
-        return False
-    if not (CART_LIMITS["y"][0] <= y <= CART_LIMITS["y"][1]):
-        return False
-    if not (CART_LIMITS["z"][0] <= z <= CART_LIMITS["z"][1]):
-        return False
-    try:
-        return ik_reachable(x, y, z)
-    except Exception:
-        return False
+def safe_print(*args):
+    message = " ".join(str(a) for a in args)
+    sys.stdout.write("\r\033[K" + message + "\r\n")
+    sys.stdout.flush()
 
 
-def clamp(value, limits):
-    return min(max(value, limits[0]), limits[1])
-
-
-def smooth_velocity(current, target, accel, decel, dt):
-    """Ramp toward the target with separate acceleration and braking limits."""
+def toward(current, target, accel, decel, dt):
+    """Rate-limit starts and stops so base commands ramp smoothly."""
+    braking = target == 0.0 or current * target < 0.0 or abs(target) < abs(current)
+    max_change = (decel if braking else accel) * dt
     diff = target - current
-    is_braking = (current > 0 and target < current) or (current < 0 and target > current)
-    rate = decel if is_braking else accel
-    max_change = rate * dt
     if abs(diff) <= max_change:
         return target
-    return current + (max_change if diff > 0 else -max_change)
+    return current + math.copysign(max_change, diff)
+
+
+def jog_directions(keys):
+    """Per-axis -1/0/+1 from the held or pulsed key set."""
+    positive = set()
+    negative = set()
+    for key in keys:
+        for digit in COMBO_KEYS.get(key, key):
+            axis, direction = JOG_KEYS[digit]
+            (positive if direction > 0 else negative).add(axis)
+    return tuple(int(axis in positive) - int(axis in negative) for axis in range(3))
 
 
 class Arm:
-    """Local joint state plus slew-limited motion toward a target."""
+    """Local joint state advanced by checked joint moves."""
 
     def __init__(self):
         self.current = list(HOME_JOINTS)
-        self.target = list(HOME_JOINTS)
         self.synced = False
-        self.last_pose = fk(*self.current)
-        self.last_pub = 0.0
-        self.last_limit_msg = 0.0
 
     def sync_to(self, joints):
         self.current = list(joints)
-        self.target = list(joints)
-        self.last_pose = fk(*self.current)
         self.synced = True
 
     def home(self):
         self.sync_to(HOME_JOINTS)
 
-    def jog(self, axis, direction):
-        """Add one step to a joint target; returns False if arm is not synced."""
+    def jog(self, axis, direction, step=None):
+        if step is None:
+            step = BASE_YAW_STEP if axis == 0 else JOINT_STEP
+        deltas = [0.0] * len(JOINT_LIMITS)
+        deltas[axis] = direction * step
+        return self.jog_axes(deltas)
+
+    def jog_axes(self, deltas, tip_step=None):
+        """Advance the requested joints together, staying within the arm limits."""
         if not self.synced:
-            return False
-        limits = JOINT_LIMITS[axis]
-        lo = max(limits[0], self.current[axis] - MAX_LEAD)
-        hi = min(limits[1], self.current[axis] + MAX_LEAD)
-        self.target[axis] = clamp(self.target[axis] + direction * JOINT_STEP, (lo, hi))
-        return True
+            return None
+        start = self.current
+        goal = []
+        limit_reason = None
+        for value, delta, (lo, hi), name in zip(start, deltas, JOINT_LIMITS, JOINT_NAMES):
+            requested = value + delta
+            bounded = max(lo, min(hi, requested))
+            goal.append(bounded)
+            if bounded != requested:
+                limit_reason = "%s joint limit (%.1f..%.1f deg)" % (name, lo, hi)
+        if goal == start:
+            return False, limit_reason
 
-    def drop_target(self):
-        self.target = list(self.current)
+        def joints_at(fraction):
+            return [a + (b - a) * fraction for a, b in zip(start, goal)]
 
-    def step(self, dt):
-        """Move the joints toward the target. Returns True if any joint moved.
-
-        If the combined move is unreachable, each joint is tried on its own:
-        the blocked joint is reset to its current angle and stops, while the
-        other joints keep moving. This prevents one axis at a Cartesian limit
-        from freezing the whole arm.
-        """
-        max_step = JOINT_SPEED * dt
-        desired = list(self.current)
-        for i in range(3):
-            delta = self.target[i] - self.current[i]
-            if abs(delta) < 1e-9:
-                continue
-            step = max(-max_step, min(max_step, delta))
-            desired[i] = clamp(self.current[i] + step, JOINT_LIMITS[i])
-
-        if desired == self.current:
-            return False
-
-        x, y, z = fk(*desired)
-        if pose_ok(x, y, z):
-            self.current = desired
-            return True
-
-        # Combined move is unreachable. Accept whatever axes can move alone.
-        accepted = list(self.current)
-        moved = False
-        blocked = []
-        for i in range(3):
-            if desired[i] == self.current[i]:
-                continue
-            trial = list(accepted)
-            trial[i] = desired[i]
-            tx, ty, tz = fk(*trial)
-            if pose_ok(tx, ty, tz):
-                accepted = trial
-                moved = True
-            else:
-                blocked.append(i)
-                self.target[i] = self.current[i]   # stop this axis only
-
-        if moved:
-            self.current = accepted
-
-        now = time.time()
-        if blocked and now - self.last_limit_msg > 1.0:
-            names = ", ".join(("base", "shoulder", "elbow")[i] for i in blocked)
-            if moved:
-                print("arm limit: %s blocked (other axes still active; x=%.1f y=%.1f z=%.1f)"
-                      % (names, x, y, z))
-            else:
-                print("arm limit: %s blocked (move back to continue; x=%.1f y=%.1f z=%.1f)"
-                      % (names, x, y, z))
-            self.last_limit_msg = now
-        return moved
+        fraction = 1.0
+        if tip_step is not None:
+            origin = fk(*start)
+            if distance(origin, fk(*goal)) > tip_step:
+                fraction = furthest_valid(
+                    0.0, 1.0, lambda f: distance(origin, fk(*joints_at(f))) <= tip_step
+                )
+        trial = joints_at(fraction)
+        reason = check_pose(trial)
+        if reason:
+            allowed = furthest_valid(0.0, fraction, lambda f: check_pose(joints_at(f)) is None)
+            trial = joints_at(allowed)
+            if max(abs(a - b) for a, b in zip(start, trial)) < MIN_MOVE:
+                return False, reason
+        if trial == start:
+            return False, limit_reason
+        self.current = trial
+        return True, reason or limit_reason
 
 
-class ArmStateReader:
-    """Use /SwiftproState_topic to initialise the joint state when available."""
+class JogController:
+    """Issue one joint target from fresh keyboard input."""
 
     def __init__(self, arm):
         self.arm = arm
+        self.last_step = -math.inf
+        self.stop()
+
+    def stop(self):
+        self.directions = (0, 0, 0)
+        self.last_input = -math.inf
+        self.speed = 0.0
+        self.blocked = False
+        self.last_limit = None
+
+    def press(self, keys, now):
+        directions = jog_directions(keys)
+        changed = directions != self.directions
+        if changed:
+            self.stop()
+            self.directions = directions
+        if not any(directions) or self.blocked:
+            return None
+
+        restarted = now - self.last_input >= JOG_RESTART_GAP
+        self.last_input = now
+        elapsed = now - self.last_step
+        # The control loop calls press() every tick, so allow a little jitter
+        # below JOG_PERIOD instead of dropping every other step.
+        if not changed and elapsed < JOG_PERIOD * 0.9:
+            return None
+        if restarted:
+            self.speed = 0.0
+        interval = JOG_PERIOD if restarted else min(elapsed, JOG_MAX_INTERVAL)
+        return self._move(now, interval)
+
+    def _move(self, now, interval):
+        joints = self.arm.current
+        x, y, _ = fk(*joints)
+        radii = (max(1.0, math.hypot(x, y)), MATH_LOWER_ARM, MATH_UPPER_ARM)
+        yaw_step = min(BASE_YAW_STEP, BASE_YAW_SPEED * interval)
+        max_steps = (yaw_step, JOINT_STEP, JOINT_STEP)
+        self.speed = min(ARM_JOG_SPEED, self.speed + JOG_ACCEL * interval)
+        deltas = []
+        for axis, (direction, radius, max_step) in enumerate(zip(self.directions, radii, max_steps)):
+            end = JOINT_LIMITS[axis][int(direction > 0)]
+            remaining = radius * math.radians(abs(end - joints[axis]))
+            speed = min(self.speed, math.sqrt(2 * JOG_ACCEL * remaining)) if remaining else self.speed
+            deltas.append(direction * min(max_step, math.degrees(speed * interval / radius)))
+
+        result = self.arm.jog_axes(deltas, tip_step=self.speed * interval)
+        if result is None:
+            return None
+        moved, reason = result
+        if moved:
+            self.last_step = now
+        else:
+            self.blocked = True
+        repeated_limit = reason == self.last_limit
+        self.last_limit = reason
+        return moved, None if repeated_limit else reason
+
+
+def vertical_joints(x, y, z):
+    joints = ik(x, y, z)
+    return joints if joints is not None and check_pose(joints) is None else None
+
+
+class VerticalLift:
+    """Raise the tip through a checked vertical path at its pickup X and Y."""
+
+    def __init__(self, arm):
+        self.arm = arm
+        self.stop()
+
+    def stop(self):
+        self.next_step = None
+
+    def start(self, now):
+        self.x, self.y, self.height = fk(*self.arm.current)
+        self.goal = self.height
+        self.speed = 0.0
+        while self.goal < Z_LIMITS[1]:
+            candidate = min(self.goal + 1.0, Z_LIMITS[1])
+            if vertical_joints(self.x, self.y, candidate) is None:
+                self.goal = furthest_valid(
+                    self.goal, candidate, lambda z: vertical_joints(self.x, self.y, z) is not None
+                )
+                break
+            self.goal = candidate
+        if self.goal - self.height <= 0.05:
+            return False
+        self.next_step = now + PUMP_LIFT_DELAY
+        return True
+
+    def step(self, now):
+        remaining = self.goal - self.height
+        self.speed = min(ARM_JOG_SPEED, self.speed + JOG_ACCEL * JOG_PERIOD,
+                         math.sqrt(2 * JOG_ACCEL * remaining))
+        height = min(self.goal, self.height + self.speed * JOG_PERIOD)
+        joints = vertical_joints(self.x, self.y, height)
+        if joints is None:
+            self.stop()
+            return None
+        self.arm.sync_to(joints)
+        self.height = height
+        if height >= self.goal:
+            self.stop()
+        else:
+            self.next_step = now + JOG_PERIOD
+        return fk(*joints)
+
+
+class TerminalKeys:
+    """Decode plain keys and Kitty press, repeat and release messages."""
+
+    def __init__(self):
+        self.pending = b""
+
+    def feed(self, data):
+        data = self.pending + data
+        self.pending = b""
+        events = []
+        index = 0
+        while index < len(data):
+            byte = data[index]
+            index += 1
+            event = 0
+            if byte != 27:
+                key = chr(byte).lower()
+            elif index == len(data):
+                self.pending = data[index - 1:]
+                break
+            elif data[index] == ord("["):
+                end = CSI_END.search(data, index + 1)
+                if end is None:
+                    self.pending = data[index - 1:] if len(data) - index < 64 else b""
+                    break
+                sequence = data[index + 1:end.end()]
+                index = end.end()
+                if sequence == b"O":  # terminal lost focus
+                    events.append((None, 3))
+                    continue
+                match = KITTY_KEY.fullmatch(sequence)
+                if match is None:
+                    continue
+                code, mods, event = (int(value or b"1") for value in match.groups())
+                if 57399 <= code <= 57408:
+                    code = ord("0") + code - 57399
+                if code == 57414:
+                    code = 13
+                key = chr(code).lower() if code < 128 else ""
+                if key == "c" and (mods - 1) & 4:
+                    key = "\x03"
+                elif (mods - 1) & 6:
+                    continue
+            elif data[index] == ord("O"):
+                if index + 1 == len(data):
+                    self.pending = data[index - 1:]
+                    break
+                keypad = data[index + 1]
+                index += 2
+                key = chr(ord("0") + keypad - ord("p")) if ord("p") <= keypad <= ord("y") else ""
+                if keypad == ord("M"):
+                    key = "\r"
+            else:
+                index += 1
+                continue
+            if key and key in ACCEPTED_KEYS:
+                events.append((key, event))
+        return events
+
+
+class HeldKeys:
+    """Track which keys count as held, from Kitty events or plain bytes.
+
+    Motion is driven from the control loop while a key is live, so a press
+    starts moving on the next tick instead of waiting for the terminal's
+    key-repeat delay. Kitty press/release events give exact edges, which is
+    what lets an arm key and a base key stay held together; a plain terminal
+    only repeats the most recently pressed key, so a byte renews a hold that
+    is long enough to bridge the gaps between repeats.
+    """
+
+    def __init__(self, plain_timeout=PLAIN_HOLD_TIMEOUT, repeat_timeout=None,
+                 tap_min=TAP_MIN_DURATION):
+        self.plain_timeout = plain_timeout
+        self.repeat_timeout = repeat_timeout
+        self.tap_min = tap_min
+        self.until = {}
+        self.started = {}
+        self.last_plain = {}
+
+    def __bool__(self):
+        return bool(self.until)
+
+    def clear(self):
+        self.until.clear()
+        self.started.clear()
+        self.last_plain.clear()
+
+    def update(self, key, event, now):
+        if event == 3:  # Kitty release
+            started = self.started.pop(key, now)
+            # A quick press+release in one read still moves briefly.
+            deadline = max(now, started + self.tap_min)
+            if deadline > now:
+                self.until[key] = deadline
+            else:
+                self.until.pop(key, None)
+        elif event == 1:  # Kitty press
+            self.started[key] = now
+            self.until[key] = now + HELD_MAX_DURATION
+        elif event == 2:  # Kitty repeat refreshes the safety deadline
+            if key in self.started:
+                self.until[key] = now + HELD_MAX_DURATION
+        else:  # plain byte: no release information
+            if self.repeat_timeout is None:
+                self.until[key] = now + self.plain_timeout
+            else:
+                prior = self.last_plain.get(key)
+                self.last_plain[key] = now
+                fresh = prior is None or now - prior > self.plain_timeout
+                self.until[key] = now + (self.plain_timeout if fresh
+                                         else self.repeat_timeout)
+
+    def live(self, now):
+        """Return the keys still held and drop the expired ones."""
+        for key in [k for k, until in self.until.items() if until <= now]:
+            del self.until[key]
+            self.started.pop(key, None)
+            self.last_plain.pop(key, None)
+        return set(self.until)
+
+
+class ArmStateReader:
+    """Initialize local joint state from /SwiftproState_topic if not yet synced."""
+
+    def __init__(self, arm):
+        self.arm = arm
+        self.done = False
+        self.lock = threading.Lock()
+
+    def finish(self):
+        with self.lock:
+            self.done = True
 
     def callback(self, msg):
-        if self.arm.synced:
+        if self.done or self.arm.synced:
             return
-        if abs(msg.x) > 1.0 or abs(msg.y) > 1.0 or abs(msg.z) > 1.0:
-            joints = ik(msg.x, msg.y, msg.z)
-            if joints is None:
-                return
-            in_limits = all(lo <= v <= hi for v, (lo, hi) in zip(joints, JOINT_LIMITS))
-            if not in_limits:
+        if abs(msg.x) <= 1.0 and abs(msg.y) <= 1.0 and abs(msg.z) <= 1.0:
+            return
+        joints = validated_pose_joints(msg.x, msg.y, msg.z)
+        if joints is None:
+            return
+        with self.lock:
+            if self.done or self.arm.synced:
                 return
             self.arm.sync_to(joints)
-            print("arm synced from /SwiftproState_topic: a0=%.1f a1=%.1f a2=%.1f"
-                  % tuple(joints))
+            self.done = True
+        safe_print(
+            "arm synced from /SwiftproState_topic: a0=%.1f a1=%.1f a2=%.1f"
+            % tuple(joints)
+        )
 
 
 def main():
     rospy.init_node("key_fullbody", anonymous=True, argv=[sys.argv[0]])
 
     cmd_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=1)
-    pos_pub = rospy.Publisher("/position_write_topic", position, queue_size=1)
+    pos_pub = rospy.Publisher("/position_write_topic", position, queue_size=1, tcp_nodelay=True)
     pump_pub = rospy.Publisher("/pump_topic", status, queue_size=1)
+    status_pub = rospy.Publisher("/swiftpro_status_topic", status, queue_size=1)
 
     arm = Arm()
+    saved = load_saved_pose()
+    if saved is not None:
+        arm.sync_to(saved)
+        print(
+            "resumed from saved pose: x=%.1f y=%.1f z=%.1f (a0=%.1f a1=%.1f a2=%.1f)"
+            % (fk(*saved) + tuple(saved))
+        )
+
     state_reader = ArmStateReader(arm)
     rospy.Subscriber("/SwiftproState_topic", SwiftproState, state_reader.callback, queue_size=1)
     rospy.sleep(0.5)
 
     def wait_for(publisher, topic, hint, timeout=2.0):
-        deadline = time.time() + timeout
-        while (publisher.get_num_connections() == 0
-               and time.time() < deadline
-               and not rospy.is_shutdown()):
+        deadline = time.monotonic() + timeout
+        while (
+            publisher.get_num_connections() == 0
+            and time.monotonic() < deadline
+            and not rospy.is_shutdown()
+        ):
             rospy.sleep(0.1)
         if publisher.get_num_connections() == 0:
             print("WARNING: no subscriber on %s." % topic)
             print("         %s" % hint)
 
-    wait_for(cmd_pub, "/cmd_vel",
-             "Start the base driver: roslaunch spark_bringup driver_bringup.launch "
-             "camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6")
-    wait_for(pos_pub, "/position_write_topic",
-             "Start the arm driver: roslaunch swiftpro pro_control_nomoveit.launch\n"
-             "         Arm keys and the pump will not work until it is running.")
-    wait_for(pump_pub, "/pump_topic",
-             "The arm driver (swiftpro) also provides the vacuum pump.")
+    wait_for(
+        cmd_pub,
+        "/cmd_vel",
+        "Start the base driver: roslaunch spark_bringup driver_bringup.launch "
+        "camera_type_tel:=d435 lidar_type_tel:=ydlidar_g6",
+    )
+    wait_for(
+        pos_pub,
+        "/position_write_topic",
+        "Start the arm driver: roslaunch swiftpro pro_control_nomoveit.launch\n"
+        "         Arm keys and the pump will not work until it is running.",
+    )
+    wait_for(pump_pub, "/pump_topic", "The arm driver (swiftpro) also provides the vacuum pump.")
+    wait_for(
+        status_pub,
+        "/swiftpro_status_topic",
+        "The arm driver (swiftpro) also handles motor attach.",
+    )
+
+    def attach_arm():
+        """Send 0 -> 1 on /swiftpro_status_topic to detach then attach arm motors."""
+        if status_pub.get_num_connections() == 0:
+            safe_print("no subscriber on /swiftpro_status_topic - cannot attach arm")
+            return
+        safe_print("attaching arm motors (0 -> 1 on /swiftpro_status_topic)...")
+        m0 = status()
+        m0.status = 0
+        status_pub.publish(m0)
+        rospy.sleep(1.0)
+        m1 = status()
+        m1.status = 1
+        status_pub.publish(m1)
+        rospy.sleep(1.0)
+        safe_print("  arm attached - motors enabled")
+
+    attach_arm()
 
     if not arm.synced:
-        print("  arm pose unknown - press 0 first to home/sync the arm.")
+        print("")
+        print("  ARM NOT SYNCED - arm keys are ignored until the pose is known.")
+        print("  Establish the starting pose with one home command:")
+        print("      press 0 once  ->  release the pump and send the arm to home")
+        print("  After that the pose is saved and later runs resume automatically.")
+        print("")
 
     def set_pump(on):
         msg = status()
@@ -418,137 +897,272 @@ def main():
         msg = position()
         msg.x, msg.y, msg.z = x, y, z
         pos_pub.publish(msg)
-        arm.last_pose = (x, y, z)
-        arm.last_pub = time.time()
 
-    print(HELP)
-    print("  base: %.2f m/s / %.2f rad/s   arm: %.0f deg/press at %.0f deg/s"
-          % (LIN_SPEED, ANG_SPEED, JOINT_STEP, JOINT_SPEED))
-    print("  arm limits: base %.0f..%.0f  shoulder %.0f..%.0f  elbow %.0f..%.0f"
-          % (A0_LIMITS + A1_LIMITS + A2_LIMITS))
+    print(HELP % ARM_JOG_SPEED)
+    print(
+        "  base: %.2f m/s / %.2f rad/s" % (LIN_SPEED, ANG_SPEED)
+    )
+    print(
+        "  arm limits: base %.1f..%.1f  shoulder %.0f..%.0f  elbow %.0f..%.0f"
+        % (A0_LIMITS + A1_LIMITS + A2_LIMITS)
+    )
+    print(
+        "              shoulder+elbow <= %.0f   reach <= %.0f mm   z %.0f..%.0f mm"
+        % (FOLD_MAX, MAX_REACH, Z_LIMITS[0], Z_LIMITS[1])
+    )
+    if _arm_ik_reachable is not None:
+        print("              arm_ik.ik_reachable() is also checked")
 
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
 
-    target_linear = target_angular = 0.0
-    linear = angular = 0.0
-    last_base_key = 0.0
-    last_base_char = ""
-    hold_timeout = HOLD_GRACE
-    last_arm_key = 0.0
+    target_linear = target_turn = 0.0
+    actual_linear = actual_turn = 0.0
+    term_last_action = {}
+    term_last_movement = 0.0
+    term_interlock = False
     pump_on = False
-    last_loop = time.time()
-    rate = rospy.Rate(20)         # matches the Spark base serial driver
+    sync_warned = False
+    dirty_pose = False
+    last_target = 0.0
+    jog = JogController(arm)
+    lift = VerticalLift(arm)
+    keyboard = TerminalKeys()
+    held_keys = HeldKeys()
+    # Base keys use the same press/release tracking, so a/d/w/s can be held
+    # while arm keys are held. w/s keep the long forward pulse; a/d use a
+    # short pulse so one tap only rotates a few degrees.
+    move_keys = HeldKeys(
+        plain_timeout=TERM_FIRST_REPEAT,
+        repeat_timeout=TERM_REPEAT_TIMEOUT,
+        tap_min=TERM_FIRST_REPEAT,
+    )
+    turn_keys = HeldKeys(
+        plain_timeout=TURN_HOLD_TIMEOUT,
+        repeat_timeout=TERM_REPEAT_TIMEOUT,
+        tap_min=TURN_TAP_MIN,
+    )
+    last_loop = time.monotonic()
+    rate = rospy.Rate(1.0 / JOG_PERIOD)
 
     try:
         tty.setraw(fd)
+        # Throw away keys typed during startup/attach instead of replaying
+        # them all as one burst when the control loop begins.
+        termios.tcflush(fd, termios.TCIFLUSH)
+        if sys.stdout.isatty():
+            sys.stdout.write("\x1b[>11u\x1b[?1004h\r\n")
+            sys.stdout.flush()
+        set_base(0.0, 0.0)
+
         while not rospy.is_shutdown():
-            now = time.time()
+            now = time.monotonic()
             dt = min(max(now - last_loop, 0.0), 0.1)
             last_loop = now
 
-            # Drain all pending keys without blocking the 20 Hz control loop.
-            stop = False
-            while select.select([sys.stdin], [], [], 0)[0]:
-                char = os.read(fd, 1).decode(errors="ignore")
-                if not char:
+            ready, _, _ = select.select([sys.stdin], [], [], 0)
+            if ready:
+                data = os.read(fd, 4096)
+                if not data:
+                    break
+                events = keyboard.feed(data)
+                if b"\x03" in data or any(
+                    key == "\x03" and event != 3 for key, event in events
+                ):
                     break
 
-                if char == "\x03":                       # Ctrl+C
-                    stop = True
-                    break
-                elif char in "wWaAsSdD":                 # base
-                    key = char.lower()
-                    if key == "w":
-                        target_linear, target_angular = LIN_SPEED, 0.0
-                    elif key == "s":
-                        target_linear, target_angular = -LIN_SPEED, 0.0
-                    elif key == "a":
-                        target_linear, target_angular = 0.0, ANG_SPEED
-                    elif key == "d":
-                        target_linear, target_angular = 0.0, -ANG_SPEED
+                for key, event in events:
+                    if key is None:  # terminal lost focus
+                        held_keys.clear()
+                        move_keys.clear()
+                        turn_keys.clear()
+                        jog.stop()
+                        continue
 
-                    # A terminal sends no key-up event: the only release signal
-                    # is a pause in key repeats. The OS sends the FIRST repeat
-                    # only after its repeat delay (~0.5 s), so a short timeout
-                    # would brake right after the press. Use a long grace for a
-                    # fresh press, then a short timeout once repeats are flowing.
-                    gap = now - last_base_key
-                    if key != last_base_char or gap > HOLD_GRACE:
-                        # Fresh press or direction change: the first repeat is
-                        # delayed by the terminal's key-repeat delay (~0.5 s),
-                        # so do not brake until it has had time to arrive.
-                        hold_timeout = HOLD_GRACE
+                    if key in JOG_KEYS or key in COMBO_KEYS:
+                        lift.stop()
+                        term_last_movement = now
+                        held_keys.update(key, event, now)
+                        continue
+
+                    if key in BASE_KEYS:
+                        term_last_movement = now
+                        if key in "ws":
+                            move_keys.update(key, event, now)
+                        else:
+                            turn_keys.update(key, event, now)
+                        continue
+
+                    if event not in (0, 1):
+                        continue
+
+                    was_lifting = lift.next_step is not None
+                    lift.stop()
+                    jog.stop()
+                    held_keys.clear()
+
+                    if key == ATTACH_KEY:
+                        prior_action = term_last_action.get(ATTACH_KEY, -100.0)
+                        term_last_action[ATTACH_KEY] = now
+                        if now - prior_action >= TERM_ACTION_GAP:
+                            attach_arm()
+                    elif key == " ":
+                        if was_lifting:
+                            safe_print(
+                                "Lift canceled. Pump stays %s."
+                                % ("ON" if pump_on else "OFF")
+                            )
+                    elif key in ("\r", "\n"):
+                        prior_action = term_last_action.get("enter", -100.0)
+                        term_last_action["enter"] = now
+                        if now - prior_action < TERM_ACTION_GAP:
+                            continue
+                        if not pump_on and pump_pub.get_num_connections() == 0:
+                            safe_print("Pump driver unavailable.")
+                            continue
+                        pump_on = not pump_on
+                        set_pump(pump_on)
+                        safe_print("PUMP ON" if pump_on else "PUMP OFF")
+                        if pump_on:
+                            if not arm.synced or pos_pub.get_num_connections() == 0:
+                                safe_print(
+                                    "Lift needs a known arm pose and a connected driver."
+                                )
+                            else:
+                                state_reader.finish()
+                                if lift.start(now):
+                                    safe_print(
+                                        "Lifting straight up to z=%.1f mm." % lift.goal
+                                    )
+                                else:
+                                    safe_print(
+                                        "Already at the highest reachable point here."
+                                    )
+                    elif key == "0":
+                        prior_action = term_last_action.get("0", -100.0)
+                        term_last_action["0"] = now
+                        if now - prior_action < TERM_ACTION_GAP:
+                            continue
+                        state_reader.finish()
+                        pump_on = False
+                        set_pump(False)
+                        target_linear = target_turn = 0.0
+                        actual_linear = actual_turn = 0.0
+                        set_base(0.0, 0.0)
+                        move_keys.clear()
+                        turn_keys.clear()
+                        term_interlock = True
+                        term_last_movement = now
+                        if pos_pub.get_num_connections() == 0:
+                            safe_print("RELEASE - arm driver not running, home not sent")
+                        else:
+                            arm.home()
+                            x, y, z = fk(*arm.current)
+                            publish_pose(x, y, z)
+                            save_pose(x, y, z)
+                            dirty_pose = False
+                            safe_print(
+                                "RELEASE + HOME  (a0=%.1f a1=%.1f a2=%.1f)"
+                                % tuple(arm.current)
+                            )
+
+            # Drive the arm every tick while a key is logically held, not only
+            # when a key event arrives. Terminal key-repeat starts after a
+            # delay (and Kitty taps can press+release in one read), so
+            # event-driven jogging leaves dead presses and late bursts.
+            jog_time = time.monotonic()
+            active = held_keys.live(jog_time)
+            if active:
+                lift.stop()
+                if not term_interlock:
+                    if arm.synced and pos_pub.get_num_connections() > 0:
+                        state_reader.finish()
+                        result = jog.press(active, jog_time)
+                        if result is not None:
+                            moved, reason = result
+                            pose = fk(*arm.current)
+                            if moved:
+                                publish_pose(*pose)
+                                dirty_pose = True
+                                last_target = jog_time
+                            if reason:
+                                if len(active) == 1 and next(iter(active)) in REVERSE_KEY:
+                                    key = next(iter(active))
+                                    safe_print(
+                                        ("arm limit on %s: %s. Try %s to move back. "
+                                         "[x=%.0f y=%.0f z=%.0f]")
+                                        % ((key, reason, REVERSE_KEY[key]) + pose)
+                                    )
+                                else:
+                                    safe_print(
+                                        ("arm limit: %s  [x=%.0f y=%.0f z=%.0f]")
+                                        % ((reason,) + pose)
+                                    )
+                    elif not sync_warned:
+                        safe_print("Arm motion needs a known pose and a connected driver.")
+                        sync_warned = True
+
+            # Base target from every base key still held (computed each tick,
+            # so arm and base keys can run together).
+            move_live = move_keys.live(jog_time)
+            turn_live = turn_keys.live(jog_time)
+            if term_interlock:
+                target_linear = target_turn = 0.0
+            else:
+                target_linear = (
+                    (LIN_SPEED if "w" in move_live else 0.0)
+                    - (LIN_SPEED if "s" in move_live else 0.0)
+                )
+                target_turn = (
+                    (ANG_SPEED if "a" in turn_live else 0.0)
+                    - (ANG_SPEED if "d" in turn_live else 0.0)
+                )
+            actual_linear = toward(
+                actual_linear, target_linear, MAX_LIN_ACCEL, MAX_LIN_DECEL, dt
+            )
+            actual_turn = toward(
+                actual_turn, target_turn, MAX_ANG_ACCEL, MAX_ANG_DECEL, dt
+            )
+            set_base(actual_linear, actual_turn)
+
+            # Re-arm after 0 once movement keys have been quiet
+            if term_interlock and now - term_last_movement > TERM_REARM_PAUSE:
+                term_interlock = False
+                safe_print("  keyboard rearmed - movement enabled")
+
+            # Ramped vertical lift step
+            if lift.next_step is not None and now >= lift.next_step:
+                if pos_pub.get_num_connections() == 0:
+                    lift.stop()
+                    safe_print("Lift canceled. Arm driver disconnected.")
+                else:
+                    pose = lift.step(now)
+                    if pose is None:
+                        safe_print("Lift stopped at the last valid pose.")
                     else:
-                        # Repeats are flowing: use the crisp release timeout.
-                        hold_timeout = KEY_TIMEOUT
-                    last_base_char = key
-                    last_base_key = now
-                elif char in "482769":                   # arm joints
-                    last_arm_key = now
-                    axis, direction = {
-                        "4": (0, +1),   # base left
-                        "6": (0, -1),   # base right
-                        "7": (1, -1),   # shoulder: raise (was 8)
-                        "9": (1, +1),   # shoulder: lower (was 2)
-                        "8": (2, -1),   # elbow: extend (was 7)
-                        "2": (2, +1),   # elbow: fold (was 9)
-                    }[char]
-                    if not arm.jog(axis, direction):
-                        print("  arm not synced - press 0 first.")
-                elif char in ("\r", "\n"):               # Enter
-                    pump_on = not pump_on
-                    set_pump(pump_on)
-                    print("PUMP ON" if pump_on else "PUMP OFF")
-                elif char == "0":                        # release + home
-                    pump_on = False
-                    set_pump(False)
-                    set_base(0.0, 0.0)
-                    target_linear = target_angular = 0.0
-                    linear = angular = 0.0
-                    if pos_pub.get_num_connections() == 0:
-                        print("RELEASE - arm driver not running, home not sent")
-                    else:
-                        arm.home()
-                        x, y, z = fk(*arm.current)
-                        publish_pose(x, y, z)
-                        print("RELEASE + HOME  (a0=%.1f a1=%.1f a2=%.1f)"
-                              % tuple(arm.current))
+                        publish_pose(*pose)
+                        dirty_pose = True
+                        last_target = now
+                        if lift.next_step is None:
+                            safe_print("Lift complete at z=%.1f mm." % pose[2])
 
-            if stop:
-                break
-
-            # Base: the terminal has no key-up event, so the timeout is the
-            # key release. hold_timeout is short while repeats are flowing and
-            # long only during the initial key-repeat delay of a fresh press.
-            if now - last_base_key > hold_timeout:
-                target_linear = target_angular = 0.0
-
-            # Slew the published velocity so starts and stops are smooth.
-            linear = smooth_velocity(linear, target_linear,
-                                     MAX_LIN_ACCEL, MAX_LIN_DECEL, dt)
-            angular = smooth_velocity(angular, target_angular,
-                                      MAX_ANG_ACCEL, MAX_ANG_DECEL, dt)
-            set_base(linear, angular)
-
-            # Arm: drop the remaining target when the key has been released.
-            if now - last_arm_key > ARM_TIMEOUT:
-                arm.drop_target()
-
-            moved = arm.step(dt)
-            if now - arm.last_pub >= ARM_PERIOD:
-                x, y, z = fk(*arm.current)
-                if (x, y, z) != arm.last_pose or moved:
-                    publish_pose(x, y, z)
+            if dirty_pose and now - last_target > 0.3:
+                save_pose(*fk(*arm.current))
+                dirty_pose = False
 
             rate.sleep()
 
     finally:
+        if sys.stdout.isatty():
+            sys.stdout.write("\x1b[<u\x1b[?1004l")
+            sys.stdout.flush()
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        set_base(0.0, 0.0)
-        rospy.sleep(0.1)
-        set_base(0.0, 0.0)
+        for _ in range(5):
+            set_base(0.0, 0.0)
+            time.sleep(0.02)
         set_pump(False)
+        if arm.synced:
+            save_pose(*fk(*arm.current))
         rospy.sleep(0.1)
         set_pump(False)
         print("\nstopped - base stopped, pump off")
