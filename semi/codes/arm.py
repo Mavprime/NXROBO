@@ -181,6 +181,7 @@ JOG_ACCEL = 1200.0              # mm/s²
 JOG_PERIOD = 0.05               # SwiftPro processes targets at 20 Hz
 JOG_MAX_INTERVAL = 0.07         # cap stride when repeats arrive slowly
 JOG_RESTART_GAP = 0.14          # reset acceleration between separate presses
+BLOCK_RETRY = 0.35              # s before a blocked jog retries
 TAP_MIN_DURATION = 0.18         # s a quick tap keeps moving (never a dead press)
 PLAIN_HOLD_TIMEOUT = 0.22       # s a byte keeps its key held (no release events)
 HELD_MAX_DURATION = 5.0         # s safety cap if a release event never arrives
@@ -484,16 +485,32 @@ class JogController:
         self.last_input = -math.inf
         self.speed = 0.0
         self.blocked = False
+        self.blocked_at = -math.inf
         self.last_limit = None
 
     def press(self, keys, now):
         directions = jog_directions(keys)
         changed = directions != self.directions
         if changed:
-            self.stop()
+            # Only a sign reversal needs a fresh ramp. Adding or dropping a
+            # key must keep the current speed, otherwise quick multi-key
+            # presses reset the ramp every tick and the arm crawls or stalls.
+            reversal = any(old and new and old != new
+                           for old, new in zip(self.directions, directions))
+            if reversal:
+                self.stop()
+            else:
+                self.blocked = False
+                self.blocked_at = -math.inf
             self.directions = directions
-        if not any(directions) or self.blocked:
+        if not any(directions):
             return None
+        if self.blocked:
+            # A held key retries after a short pause instead of latching
+            # forever when one combined pose was rejected.
+            if now - self.blocked_at < BLOCK_RETRY:
+                return None
+            self.blocked = False
 
         restarted = now - self.last_input >= JOG_RESTART_GAP
         self.last_input = now
@@ -529,6 +546,7 @@ class JogController:
             self.last_step = now
         else:
             self.blocked = True
+            self.blocked_at = now
         repeated_limit = reason == self.last_limit
         self.last_limit = reason
         return moved, None if repeated_limit else reason
@@ -946,6 +964,10 @@ def main():
             # event-driven jogging leaves dead presses and late bursts.
             now = time.monotonic()
             active = held_keys.live(now)
+            # Releasing every arm key ends the jog cleanly, so a later press
+            # of the same direction is not left latched in `blocked`.
+            if not active and jog.directions != (0, 0, 0):
+                jog.stop()
             if active:
                 lift.stop()
                 if arm.synced and pos_pub.get_num_connections() > 0:
