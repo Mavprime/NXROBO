@@ -44,11 +44,18 @@ renew the hold for PLAIN_HOLD_TIMEOUT on every repeat byte. Queued repeats are
 discarded rather than replayed, and an idle loop never sends a jog.
 The base is ramped the same way by LIN_SPEED/ANG_SPEED and the MAX_* limits.
 
-Terminals that support Kitty key events let you hold a shoulder and elbow key
-together, or an arm key and a base key, and the script sees the release. The
-Q/E/Z/C shortcuts work in ordinary SSH terminals too. An SSH terminal sends
-repeats without a release event, so base motion also stops after
-TERM_REPEAT_TIMEOUT of silence.
+Base keys use the same tracking, so w/a/s/d can stay held while 4/6/7/9/8/2
+are held: the base target and the arm jog are recomputed together every tick.
+w/s use the long forward pulse (TERM_FIRST_REPEAT), while a/d use a short pulse
+(TURN_TAP_MIN) and a lower ANG_SPEED, so one a/d tap only rotates a few degrees
+instead of a large angle.
+
+Terminals that support Kitty key events report each press and release, so held
+keys stay independent. The Q/E/Z/C shortcuts work in ordinary SSH terminals
+too. A plain SSH terminal repeats only the most recently pressed key, so a
+fresh key coasts for its tap window and a repeating one for
+TERM_REPEAT_TIMEOUT; re-tap the base key if you want to turn for longer while
+another key is repeating.
 
 Turning the pump on lifts as high as the arm can go at its current X and Y.
 A movement key, Space, or turning the pump off cancels the remaining lift.
@@ -95,14 +102,16 @@ Usage
     python3 ~/semi/key_fullbody.py --check-kinematics   # no ROS needed
 
 Environment overrides:
-    LIN_SPEED=0.35             m/s
-    ANG_SPEED=1.2              rad/s
+    LIN_SPEED=0.45             m/s
+    ANG_SPEED=0.5              rad/s
     MAX_LIN_ACCEL=2.0          m/s^2
     MAX_LIN_DECEL=4.0          m/s^2
     MAX_ANG_ACCEL=6.0          rad/s^2
     MAX_ANG_DECEL=10.0         rad/s^2
-    TERM_FIRST_REPEAT=0.95     s a fresh key is held before release
+    TERM_FIRST_REPEAT=0.95     s a fresh w/s key is held before release
     TERM_REPEAT_TIMEOUT=0.32   s between repeats before the base is released
+    TURN_TAP_MIN=0.20          s a quick a/d tap rotates (keeps taps small)
+    TURN_HOLD_TIMEOUT=0.35     s a plain a/d byte keeps turning (no repeats)
     TERM_REARM_PAUSE=0.90      s quiet time before movement re-arms after 0
     TERM_ACTION_GAP=0.90       s minimum gap between repeated Enter/0/m presses
     JOINT_STEP=10              upper bound on an arm joint step in degrees
@@ -163,8 +172,8 @@ FOLD_MAX = 180.0 - MIN_ELBOW_ANGLE
 POSE_EPSILON = 1e-9
 
 # Base ramping.
-LIN_SPEED = float(os.environ.get("LIN_SPEED", "0.35"))
-ANG_SPEED = float(os.environ.get("ANG_SPEED", "1.2"))
+LIN_SPEED = float(os.environ.get("LIN_SPEED", "0.45"))
+ANG_SPEED = float(os.environ.get("ANG_SPEED", "0.5"))
 MAX_LIN_ACCEL = float(os.environ.get("MAX_LIN_ACCEL", "2.0"))
 MAX_LIN_DECEL = float(os.environ.get("MAX_LIN_DECEL", "4.0"))
 MAX_ANG_ACCEL = float(os.environ.get("MAX_ANG_ACCEL", "6.0"))
@@ -172,6 +181,9 @@ MAX_ANG_DECEL = float(os.environ.get("MAX_ANG_DECEL", "10.0"))
 
 TERM_FIRST_REPEAT = float(os.environ.get("TERM_FIRST_REPEAT", "0.95"))
 TERM_REPEAT_TIMEOUT = float(os.environ.get("TERM_REPEAT_TIMEOUT", "0.32"))
+# a/d turn in short pulses so one tap is only a few degrees.
+TURN_TAP_MIN = float(os.environ.get("TURN_TAP_MIN", "0.20"))
+TURN_HOLD_TIMEOUT = float(os.environ.get("TURN_HOLD_TIMEOUT", "0.35"))
 TERM_REARM_PAUSE = float(os.environ.get("TERM_REARM_PAUSE", "0.90"))
 TERM_ACTION_GAP = float(os.environ.get("TERM_ACTION_GAP", "0.90"))
 
@@ -918,12 +930,17 @@ def main():
     keyboard = TerminalKeys()
     held_keys = HeldKeys()
     # Base keys use the same press/release tracking, so a/d/w/s can be held
-    # while arm keys are held. A fresh plain byte coasts for TERM_FIRST_REPEAT
-    # (as before) because the OS only repeats the last key pressed.
-    base_keys = HeldKeys(
+    # while arm keys are held. w/s keep the long forward pulse; a/d use a
+    # short pulse so one tap only rotates a few degrees.
+    move_keys = HeldKeys(
         plain_timeout=TERM_FIRST_REPEAT,
         repeat_timeout=TERM_REPEAT_TIMEOUT,
         tap_min=TERM_FIRST_REPEAT,
+    )
+    turn_keys = HeldKeys(
+        plain_timeout=TURN_HOLD_TIMEOUT,
+        repeat_timeout=TERM_REPEAT_TIMEOUT,
+        tap_min=TURN_TAP_MIN,
     )
     last_loop = time.monotonic()
     rate = rospy.Rate(1.0 / JOG_PERIOD)
@@ -957,7 +974,8 @@ def main():
                 for key, event in events:
                     if key is None:  # terminal lost focus
                         held_keys.clear()
-                        base_keys.clear()
+                        move_keys.clear()
+                        turn_keys.clear()
                         jog.stop()
                         continue
 
@@ -969,7 +987,10 @@ def main():
 
                     if key in BASE_KEYS:
                         term_last_movement = now
-                        base_keys.update(key, event, now)
+                        if key in "ws":
+                            move_keys.update(key, event, now)
+                        else:
+                            turn_keys.update(key, event, now)
                         continue
 
                     if event not in (0, 1):
@@ -1028,7 +1049,8 @@ def main():
                         target_linear = target_turn = 0.0
                         actual_linear = actual_turn = 0.0
                         set_base(0.0, 0.0)
-                        base_keys.clear()
+                        move_keys.clear()
+                        turn_keys.clear()
                         term_interlock = True
                         term_last_movement = now
                         if pos_pub.get_num_connections() == 0:
@@ -1082,17 +1104,18 @@ def main():
 
             # Base target from every base key still held (computed each tick,
             # so arm and base keys can run together).
-            base_live = base_keys.live(jog_time)
+            move_live = move_keys.live(jog_time)
+            turn_live = turn_keys.live(jog_time)
             if term_interlock:
                 target_linear = target_turn = 0.0
             else:
                 target_linear = (
-                    (LIN_SPEED if "w" in base_live else 0.0)
-                    - (LIN_SPEED if "s" in base_live else 0.0)
+                    (LIN_SPEED if "w" in move_live else 0.0)
+                    - (LIN_SPEED if "s" in move_live else 0.0)
                 )
                 target_turn = (
-                    (ANG_SPEED if "a" in base_live else 0.0)
-                    - (ANG_SPEED if "d" in base_live else 0.0)
+                    (ANG_SPEED if "a" in turn_live else 0.0)
+                    - (ANG_SPEED if "d" in turn_live else 0.0)
                 )
             actual_linear = toward(
                 actual_linear, target_linear, MAX_LIN_ACCEL, MAX_LIN_DECEL, dt
