@@ -48,3 +48,6 @@ desktop.ini
 
 # Operator view snapshots downloaded by run_grasp_test.bat (runtime artifacts)
 snapshots/
+
+# local snapshot of the team stack on the 10.24.170.0 robot
+spc/

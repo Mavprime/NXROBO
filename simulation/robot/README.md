@@ -11,19 +11,21 @@ The robot already has ROS Noetic + Gazebo Classic 11 and the Spark model.
 
 ## Deploy
 
-From `simulation/`:
+One command, from `simulation/`:
 
 ```bash
-ssh spark@<IP> 'mkdir -p ~/codes/{sim,ros,maps,robot,config}'
-scp gazebo/arena.world            spark@<IP>:~/codes/sim/
-scp assets/spark1_description/urdf/spark1_description_nav.urdf spark@<IP>:~/codes/sim/
-scp gazebo/spark_arena.launch     spark@<IP>:~/codes/sim/
-scp ros/nav_arena.launch ros/move_base_arena.launch spark@<IP>:~/codes/ros/
-scp maps/arena_map.*              spark@<IP>:~/codes/maps/
-scp robot/*.sh                    spark@<IP>:~/codes/robot/
-scp config/arena_map.yaml config/mission_demo.yaml config/gate.yaml spark@<IP>:~/codes/config/
-ssh spark@<IP> 'chmod +x ~/codes/robot/*.sh'
+bash robot/deploy.sh spark@<IP>
 ```
+
+It stops a sim left running by a previous deploy, creates
+`~/codes/{config,maps,ros,robot,sim,assets}`, copies the tree, sets exec bits, refreshes
+the remote rospack index (a stale cache hid `auto_match` / `spark1_description` on
+2026-11-23) and prints a preflight. Safe to re-run after any edit.
+
+Layout: `codes/*.py` → `~/codes/`, `config/` → `~/codes/config/`, `maps/` →
+`~/codes/maps/`, `ros/` → `~/codes/ros/`, `robot/` → `~/codes/robot/`, Gazebo
+world/launch + the nav URDF → `~/codes/sim/`, `assets/` → `~/codes/assets/` (fallback
+packages).
 
 `spark1_description_nav.urdf` is the model without the camera sensor: the depth camera
 rendering pushed the NUC to load ~6/8, and navigation does not need it. The full model

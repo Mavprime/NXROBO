@@ -56,6 +56,9 @@ intentional.</p>
       <td>PC</td></tr>
   <tr><td>Unit tests (80)</td>
       <td><code>python3 -m unittest discover -s tests</code></td><td>PC</td></tr>
+  <tr><td>Deploy sim to Spark</td>
+      <td><code>bash "$HOME/Documents/Extra/ROS Comp/simulation/robot/deploy.sh" spark@&lt;robot-ip&gt;</code></td>
+      <td>PC</td></tr>
   <tr><td>Start Gazebo + nav on Spark</td>
       <td><code>bash ~/codes/robot/start_sim.sh</code></td><td>Spark</td></tr>
   <tr><td>Run full mission in Gazebo</td>
@@ -67,6 +70,10 @@ intentional.</p>
       <td><code>bash ~/codes/robot/stop_sim.sh</code></td><td>Spark</td></tr>
   <tr><td>RViz on the PC (ROS1 in Docker)</td>
       <td><code>cd simulation/docker &amp;&amp; ROBOT_IP=&lt;robot-ip&gt; ./run_pc_rviz.sh</code></td><td>PC</td></tr>
+  <tr><td>Vendor arm-camera one-key</td>
+      <td><code>export DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority</code><br>
+          <code>cd ~/spark_noetic &amp;&amp; ./onekey.sh</code> then <code>8</code>, <code>2</code></td>
+      <td>Spark, VNC 5900</td></tr>
   <tr><td>Real-robot bridge check</td>
       <td><code>python3 -u ~/codes/bridge_check.py _mode:=dlt ...</code></td><td>Spark (11311)</td></tr>
   <tr><td>Check the real camera driver</td>
@@ -271,9 +278,53 @@ python3 -u ~/codes/calib3d.py --check
 python3 -u ~/codes/calib3d.py
 python3 -u ~/codes/calib3d.py --check
 
-# vendor red-square one-key: Spark desktop/VNC terminal only
-cd ~/spark_noetic &#38;&#38; ./onekey.sh    # 8, uArm, align green icon in red box, Enter
+# vendor red-square one-key: needs DISPLAY (see below)
+cd ~/spark_noetic &#38;&#38; ./onekey.sh    # 8, uArm, align pad in green box, confirm
 ls -l ~/thefile.txt</pre>
+
+<h3>Vendor one-key from SSH — DISPLAY export</h3>
+<p>The one-key opens OpenCV windows (<code>win_draw</code>, <code>win1</code>,
+<code>win2</code>) and a <code>gnome-terminal</code> confirm prompt. An SSH session has
+<code>DISPLAY</code> unset, so nothing appears. Export the robot's own desktop
+(<code>:0</code>, mirrored by <code>x11vnc</code> on port <code>5900</code>) before running:</p>
+<pre>ssh spark@&lt;robot-ip&gt;
+export DISPLAY=:0
+export XAUTHORITY=$HOME/.Xauthority
+xdpyinfo &gt;/dev/null &#38;&#38; echo "display OK"   # sanity check
+
+bash ~/codes/robot/stop_sim.sh             # free the CPU; the one-key starts its own stack
+cp ~/thefile.txt ~/thefile.txt.bak         # the one-key overwrites it, keep a rollback
+cd ~/spark_noetic &#38;&#38; ./onekey.sh
+#   8 = arm-camera calibration, 2 = uArm, Enter for the A/B/C checklist
+</pre>
+<p>Watch the windows over VNC at <code>&lt;robot-ip&gt;:5900</code> (credentials as configured
+on the robot; not stored here). Keep <code>DISPLAY</code> per-session and never put it in
+<code>~/.bashrc</code>: ROS/system services would inherit it. To show the windows on the PC
+instead of VNC, use <code>ssh -Y spark@&lt;robot-ip&gt;</code> (SSH sets the forwarded
+<code>DISPLAY</code> itself); live video is laggier that way.</p>
+
+<h3>Green-box step</h3>
+<p><code>win_draw</code> shows the camera with a <strong>20×30 px green rectangle at pixel
+(355, 310)</strong> and the text "move the camera to make the red color in the rectangle green
+box". Move the camera until the calibration pad on the suction head is <em>inside</em> that box
+(centre ≈ pixel 365, 325). The pad colour is learned from the box contents, so the blue-circle
+vs red-pad wording in the vendor files does not matter. Then confirm in the
+<code>send_topic.sh</code> prompt
+(<code>是否已经把绿色框对准了机械臂的红色标定点？</code>, any key).</p>
+<pre># after confirming
+# 1. HSV sampled from inside the box for ~5 s (200 frames)
+# 2. cali_pos.py sweeps the arm through 20 poses (x 180-&gt;275, y 200-&gt;10, z -110)
+# 3. two linear regressions fitted; result written to ~/thefile.txt  (k1 b1 k2 b2)
+</pre>
+<p>If the confirm window does not open (gnome-terminal/DBus hiccup), run the publisher by hand
+with <code>DISPLAY=:0</code> set:</p>
+<pre>bash ~/spark_noetic/src/spark_app/spark_carry/scripts/send_topic.sh
+</pre>
+<div class="note">
+<p>Verified on the Spark 2026-11-23: <code>DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority
+xdpyinfo</code> succeeds, <code>~/.Xauthority</code> is owned by <code>spark</code> (mode 600),
+and <code>x11vnc</code> listens on 5900 mirroring <code>:0</code>.</p>
+</div>
 <div class="warn">
 <p>The one-key can move the camera. Re-run the DLT check afterwards. If the D435 logs
 <code>Frames didn't arrive within 5 seconds</code>, unplug/replug the camera USB or reboot before
@@ -403,18 +454,49 @@ python3 view_run.py --seed 3       # -> ../runs/mission_demo_seed3.{png,gif}
 Cubes are dynamic objects, not in the static map.</p>
 
 <h2>7. Deploy to Spark</h2>
-<pre>cd "$HOME/Documents/Extra/ROS Comp/simulation"
-ROBOT=spark@&lt;robot-ip&gt;
-
-rsync -av config/ "$ROBOT":~/codes/config/
-rsync -av maps/   "$ROBOT":~/codes/maps/
-rsync -av codes/*.py "$ROBOT":~/codes/
-rsync -av ros/    "$ROBOT":~/codes/ros/
-rsync -av robot/  "$ROBOT":~/codes/robot/
-ssh "$ROBOT" 'chmod +x ~/codes/robot/*.sh'
+<p>One command from this PC. It stops a sim left running by an earlier deploy, copies the
+whole simulation tree into the <code>~/codes</code> layout the run scripts read, refreshes
+the robot's rospack index and prints a preflight. Safe to re-run after any edit: rsync
+sends only changed files.</p>
+<pre>bash "$HOME/Documents/Extra/ROS Comp/simulation/robot/deploy.sh" spark@&lt;robot-ip&gt;
+# or from simulation/:  bash robot/deploy.sh spark@&lt;robot-ip&gt;
 </pre>
-<p>The robot sim additionally needs <code>~/codes/sim/{arena.world,
-spark1_description_nav.urdf,spark_arena.launch}</code>; see <code>robot/README.md</code>.</p>
+<p>Target layout on the robot:</p>
+<table>
+  <tr><th>In the repo</th><th>On the robot</th><th>Read by</th></tr>
+  <tr><td><code>codes/</code></td><td><code>~/codes/</code></td>
+      <td>all nodes (<code>$HOME/codes/*.py</code>)</td></tr>
+  <tr><td><code>config/</code></td><td><code>~/codes/config/</code></td>
+      <td>mission, gate, world, move_base tuning</td></tr>
+  <tr><td><code>maps/</code></td><td><code>~/codes/maps/</code></td><td>map_server</td></tr>
+  <tr><td><code>ros/</code></td><td><code>~/codes/ros/</code></td>
+      <td>nav launch files, RViz layout, nav bring-up copy</td></tr>
+  <tr><td><code>robot/</code></td><td><code>~/codes/robot/</code></td>
+      <td>start/stop/run scripts (+x)</td></tr>
+  <tr><td><code>gazebo/arena.world</code>, <code>gazebo/spark_arena.launch</code>,
+          <code>assets/spark1_description/urdf/spark1_description_nav.urdf</code></td>
+      <td><code>~/codes/sim/</code></td><td><code>start_sim.sh</code></td></tr>
+  <tr><td><code>assets/</code> (<code>auto_match</code>, <code>spark1_description</code>)</td>
+      <td><code>~/codes/assets/</code></td>
+      <td>fallback packages between the vendor copy and the sim deploy</td></tr>
+</table>
+<p>The deploy also runs <code>rospack profile</code>. A stale rospack cache made
+<code>rospack find auto_match</code> and <code>rospack find spark1_description</code> fail on
+2026-11-23 although both are in <code>~/spark_noetic/src</code>. The deploy preflight must
+print all three paths:</p>
+<pre>auto_match:         .../spark_noetic/src/3rd_app/auto_match_25/auto_match
+spark1_description: .../spark_noetic/src/spark_app/Gazebo_demo/src/spark1_description
+gazebo:             /usr/bin/gzserver
+</pre>
+<div class="note">
+<p><code>start_sim.sh</code> appends <code>~/codes/assets</code> to <code>ROS_PACKAGE_PATH</code>
+<em>after</em> sourcing <code>spark_noetic</code>, because ROS's <code>setup.bash</code> resets
+that variable (exporting it before the script is lost). Vendor packages stay first on the path;
+the bundled <code>auto_match</code> and model are the fallback.</p>
+</div>
+<p>Erase a deploy — <strong>only when <code>~/codes</code> is sim-only</strong>:</p>
+<pre>ssh spark@&lt;robot-ip&gt; 'rm -rf ~/codes ~/logs/sim'
+</pre>
 
 <h2>8. Ports and topics</h2>
 <table>

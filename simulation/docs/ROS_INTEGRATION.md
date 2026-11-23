@@ -155,14 +155,13 @@ python3 static_map.py           # -> ../maps/arena_map.{pgm,yaml,png}
 From this repo:
 
 ```bash
-rsync -av simulation/config/arena_map.yaml simulation/config/mission_demo.yaml \
-          simulation/config/gate.yaml spark@<IP>:~/codes/config/
-rsync -av simulation/maps/arena_map.pgm simulation/maps/arena_map.yaml \
-          spark@<IP>:~/codes/maps/
-rsync -av simulation/codes/*.py spark@<IP>:~/codes/
-rsync -av simulation/ros/ spark@<IP>:~/codes/ros/
-ssh spark@<IP> 'cp ~/codes/ros/nav_bringup_arena.sh ~/codes/nav_bringup.sh && chmod +x ~/codes/nav_bringup.sh'
+bash simulation/robot/deploy.sh spark@<IP>
 ```
+
+The script copies `config/`, `maps/`, `codes/`, `ros/`, `robot/`, the Gazebo
+world/launch + nav URDF into `~/codes/sim/`, and the bundled packages into
+`~/codes/assets/`; it then installs `~/codes/nav_bringup.sh` and refreshes the remote
+rospack index. Re-run it after any edit.
 
 `start_system.sh` picks up `~/codes/nav_bringup.sh` automatically.
 

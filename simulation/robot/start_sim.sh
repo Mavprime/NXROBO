@@ -12,6 +12,10 @@ export ROS_IP="${ROBOT_IP}"
 export LIBGL_ALWAYS_SOFTWARE=1
 source /opt/ros/noetic/setup.bash
 source "$HOME/spark_noetic/devel/setup.bash"
+# The sim deploy ships spark1_description under $HOME/codes/assets (the URDF uses
+# package://spark1_description/meshes/...). ROS setup.bash resets ROS_PACKAGE_PATH,
+# so it must be appended after sourcing. Vendor packages earlier on the path win.
+export ROS_PACKAGE_PATH="${ROS_PACKAGE_PATH}:$HOME/codes/assets"
 
 LOG="$HOME/logs/sim"
 mkdir -p "$LOG"
