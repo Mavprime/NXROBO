@@ -135,6 +135,8 @@ def build(map_data, randomize_types=False):
         "bricks": bricks,
         "board_left_to_right": board,
         "board_zones": list(map_data["board_zones"]),
+        "cluster_center": list(map_data.get(
+            "cluster_center", [x0 + width / 2.0, y0 + height / 2.0])),
         "zones": zones,
         "points": {k: list(v) for k, v in map_data["points"].items()},
         "start_pose": dict(map_data["start_pose"]),

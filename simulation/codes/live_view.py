@@ -184,7 +184,7 @@ tick();
 
 class ViewerServer:
     def __init__(self, port: int, scenario: dict, state_fn: Callable[[], dict],
-                 stop_event: threading.Event) -> None:
+                 stop_event: threading.Event, host: str = "127.0.0.1") -> None:
         html = HTML_TEMPLATE.replace("__SCENARIO__", json.dumps(scenario))
         html_bytes = html.encode("utf-8")
 
@@ -214,7 +214,7 @@ class ViewerServer:
             def log_message(self, *args):
                 pass
 
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        self.httpd = ThreadingHTTPServer((host, port), Handler)
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:

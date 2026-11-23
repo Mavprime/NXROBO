@@ -1,0 +1,16 @@
+{
+  "name": "A",
+  "saved": "2026-11-23",
+  "source": "user-guided to centre A",
+  "note": "facing SOUTH (270). The earlier facing-east note was a user miscalculation, corrected 2026-11-23.",
+  "odom": {
+    "x": 0.0755107520286568,
+    "y": 0.12404230981370978,
+    "yaw_deg": 141.7126464843753
+  },
+  "map": {
+    "x": 0.225,
+    "y": 2.775,
+    "yaw_deg": 270.0
+  }
+}

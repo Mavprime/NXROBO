@@ -39,7 +39,7 @@ package and keeps the nodes deployable as scripts.
 {
   "stamp": 123.4,
   "objects": [
-    {"class": "cake", "confidence": 0.82, "x": 1.500, "y": 1.500},
+    {"class": "cake", "confidence": 0.82, "x": 1.474, "y": 1.562},
     {"class": "doll", "confidence": 0.71, "x": 1.355, "y": 1.645}
   ]
 }

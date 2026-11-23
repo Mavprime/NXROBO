@@ -395,7 +395,7 @@ class WorldModelTests(unittest.TestCase):
             sc = json.load(f)
         world = WorldModel.from_scenario(sc)
         self.assertEqual(len(world.bricks), 10)
-        self.assertEqual(world.station_pose("S"), (1.5, 1.09))
+        self.assertEqual(world.station_pose("S"), (1.474, 1.152))
         mem = MissionMemory.from_inventory(world.bricks, world.default_mapping)
         self.assertEqual(mem.available("bear"), 3)
         self.assertEqual(mem.available("cake"), 1)

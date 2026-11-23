@@ -1,0 +1,21 @@
+{
+  "name": "classification_area",
+  "saved": "2026-11-23",
+  "guided_from": "A",
+  "steps": [
+    "forward 1.00 m",
+    "turn left 90 deg",
+    "forward 0.10 m"
+  ],
+  "odom": {
+    "x": -0.7692742014984938,
+    "y": 0.6657059082010495,
+    "yaw_deg": -128.63891601562528
+  },
+  "map": {
+    "x": 0.323,
+    "y": 1.776,
+    "yaw_deg": 359.6
+  },
+  "note": "A faces south (270); point sits beside the west-wall block"
+}

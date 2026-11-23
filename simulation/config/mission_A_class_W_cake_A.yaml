@@ -1,0 +1,38 @@
+# A -> classification area -> W -> pick the cake -> deliver it to A.
+#
+# Starts at the scenario start pose: A collection centre (0.225, 2.775),
+# yaw -pi/4 ("at A, 45 deg"). The classification board is read from the
+# Classification_area point on the west wall, then the robot drives to the
+# west sorting stand-off and takes the cake off the centre of the cluster.
+# The competition rule sends the cake to zone A.
+
+name: a_class_w_cake_a
+description: >
+  Start at A, read the classification board, drive to Sorting_W, pick the
+  cake and deliver it to zone A; verify the placement.
+clock_budget_s: 540
+
+steps:
+  - goto:
+      point: Classification_area
+      tol: 0.08
+  - read_board: {}
+
+  - goto:
+      point: Sorting_W
+      tol: 0.08
+  - pick:
+      class: cake
+      station: W
+      attempts: 3
+
+  - goto:
+      point: Collection_A_approach
+      tol: 0.06
+  - place:
+      zone: A
+      level: 1
+  - verify:
+      class: cake
+      zone: A
+      timeout_s: 3.0

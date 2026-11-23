@@ -63,6 +63,9 @@ def resolve_goal(world: dict, point: str) -> tuple[float, float, float]:
     ox, oy = arena.get("origin", [0.0, 0.0])
     sx, sy = arena.get("size", [3.0, 3.0])
     cx, cy = ox + sx / 2.0, oy + sy / 2.0
+    cluster = world.get("cluster_center")
+    if cluster:                    # face the bricks, not the arena centre
+        cx, cy = float(cluster[0]), float(cluster[1])
 
     if point.startswith("Collection_"):
         zone = point.split("_")[1]

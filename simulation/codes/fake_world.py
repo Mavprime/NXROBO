@@ -141,6 +141,10 @@ class FakeWorld:
         size = arena.get("size", [3.0, 3.0])
         self.max_x = self.min_x + float(size[0])
         self.max_y = self.min_y + float(size[1])
+        cluster = scenario.get("cluster_center")
+        self.cluster = (tuple(float(v) for v in cluster) if cluster else
+                        ((self.min_x + self.max_x) / 2.0,
+                         (self.min_y + self.max_y) / 2.0))
 
         table = scenario.get("table")
         if table:
@@ -425,9 +429,8 @@ class SpatialPlatform:
             if centre is not None:
                 return math.atan2(centre[1] - target[1], centre[0] - target[0])
         if name.startswith("Sorting_"):
-            cx = (self.world.min_x + self.world.max_x) / 2.0
-            cy = (self.world.min_y + self.world.max_y) / 2.0
-            return math.atan2(cy - target[1], cx - target[0])   # face the central bricks
+            cx, cy = self.world.cluster                      # face the bricks
+            return math.atan2(cy - target[1], cx - target[0])
         if name == "Classification_area":
             return math.pi                            # face the table (west)
         return None
@@ -571,4 +574,25 @@ class SpatialPlatform:
         self.world.stop()
 
     def reframe(self, station: Optional[str]) -> None:
-        self.rotate_scan()
+        """G4 recovery: face the central bricks and creep 10 cm closer.
+
+        At a sorting stand-off the goto can stop a few centimetres outside the
+        arm reach; rotating in place (the old behaviour) turned the cube out of
+        the 90 deg camera FOV and the next window had no votes. Facing the
+        cluster and closing the last centimetres is what the real reframe does.
+        """
+        cx, cy = self.world.cluster
+        yaw = math.atan2(cy - self.world.y, cx - self.world.x)
+        deadline = self.world.t + 4.0
+        while (self.world.t < deadline and not self.stop_requested()
+               and abs(wrap(yaw - self.world.yaw)) > 0.05):
+            err = wrap(yaw - self.world.yaw)
+            self.world.set_cmd(0.0, max(-self.world.p.max_angular_rps,
+                                        min(self.world.p.max_angular_rps, 1.5 * err)))
+            self.world.advance(STEP_DT)
+        sx, sy = self.world.x, self.world.y
+        while (self.world.t < deadline and not self.stop_requested()
+               and math.hypot(self.world.x - sx, self.world.y - sy) < 0.10):
+            self.world.set_cmd(0.08, 0.0)
+            self.world.advance(STEP_DT)
+        self.world.stop()

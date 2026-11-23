@@ -1,0 +1,335 @@
+{
+  "state": "DONE",
+  "reason": "",
+  "clock_remaining": 500.76720015499814,
+  "mapping": {
+    "bear": "B",
+    "clock": "C",
+    "banana": "D",
+    "cake": "A"
+  },
+  "memory": {
+    "counts": {
+      "bear": {
+        "pending": 3
+      },
+      "clock": {
+        "pending": 3
+      },
+      "banana": {
+        "pending": 3
+      },
+      "cake": {
+        "delivered": 1
+      }
+    },
+    "carried": null,
+    "last_placed": "cake",
+    "instances": [
+      {
+        "name": "brick_0_0",
+        "cls": "bear",
+        "status": "pending",
+        "zone": null,
+        "x": 1.355,
+        "y": 1.645
+      },
+      {
+        "name": "brick_0_1",
+        "cls": "clock",
+        "status": "pending",
+        "zone": null,
+        "x": 1.5,
+        "y": 1.645
+      },
+      {
+        "name": "brick_0_2",
+        "cls": "banana",
+        "status": "pending",
+        "zone": null,
+        "x": 1.645,
+        "y": 1.645
+      },
+      {
+        "name": "brick_1_0",
+        "cls": "banana",
+        "status": "pending",
+        "zone": null,
+        "x": 1.355,
+        "y": 1.5
+      },
+      {
+        "name": "brick_1_1",
+        "cls": "clock",
+        "status": "pending",
+        "zone": null,
+        "x": 1.5,
+        "y": 1.5
+      },
+      {
+        "name": "brick_1_2",
+        "cls": "bear",
+        "status": "pending",
+        "zone": null,
+        "x": 1.645,
+        "y": 1.5
+      },
+      {
+        "name": "brick_2_0",
+        "cls": "clock",
+        "status": "pending",
+        "zone": null,
+        "x": 1.355,
+        "y": 1.355
+      },
+      {
+        "name": "brick_2_1",
+        "cls": "banana",
+        "status": "pending",
+        "zone": null,
+        "x": 1.5,
+        "y": 1.355
+      },
+      {
+        "name": "brick_2_2",
+        "cls": "bear",
+        "status": "pending",
+        "zone": null,
+        "x": 1.645,
+        "y": 1.355
+      },
+      {
+        "name": "cake",
+        "cls": "cake",
+        "status": "delivered",
+        "zone": "A",
+        "x": 1.5,
+        "y": 1.5
+      }
+    ]
+  },
+  "events": [
+    {
+      "kind": "goto",
+      "index": 0,
+      "outcome": "ok",
+      "reason": ""
+    },
+    {
+      "kind": "board_read",
+      "mapping": {
+        "bear": "B",
+        "clock": "C",
+        "banana": "D",
+        "cake": "A"
+      }
+    },
+    {
+      "kind": "read_board",
+      "index": 1,
+      "outcome": "ok",
+      "reason": ""
+    },
+    {
+      "kind": "goto",
+      "index": 2,
+      "outcome": "ok",
+      "reason": ""
+    },
+    {
+      "kind": "gate_rejected",
+      "cls": "cake",
+      "action": "reframe",
+      "reason": "G4 target not approachable"
+    },
+    {
+      "kind": "pick",
+      "index": 3,
+      "outcome": "ok",
+      "reason": ""
+    },
+    {
+      "kind": "goto",
+      "index": 4,
+      "outcome": "ok",
+      "reason": ""
+    },
+    {
+      "kind": "place",
+      "index": 5,
+      "outcome": "ok",
+      "reason": ""
+    },
+    {
+      "kind": "verify",
+      "index": 6,
+      "outcome": "ok",
+      "reason": ""
+    },
+    {
+      "kind": "picked",
+      "cls": "cake",
+      "instance": "cake"
+    },
+    {
+      "kind": "placed",
+      "cls": "cake",
+      "instance": "cake",
+      "zone": "A",
+      "status": "delivered_unverified"
+    },
+    {
+      "kind": "verified",
+      "cls": "cake",
+      "instance": "cake",
+      "zone": "A"
+    }
+  ],
+  "steps": [
+    {
+      "index": 0,
+      "kind": "goto",
+      "params": {
+        "point": "Classification_area",
+        "tol": 0.08
+      },
+      "outcome": "ok",
+      "reason": "",
+      "attempts": 1,
+      "details": {
+        "point": "Classification_area"
+      },
+      "elapsed_s": 10.600000000000016
+    },
+    {
+      "index": 1,
+      "kind": "read_board",
+      "params": {},
+      "outcome": "ok",
+      "reason": "",
+      "attempts": 1,
+      "details": {
+        "mapping": {
+          "bear": "B",
+          "clock": "C",
+          "banana": "D",
+          "cake": "A"
+        }
+      },
+      "elapsed_s": 0.0
+    },
+    {
+      "index": 2,
+      "kind": "goto",
+      "params": {
+        "point": "Sorting_W",
+        "tol": 0.08
+      },
+      "outcome": "ok",
+      "reason": "",
+      "attempts": 1,
+      "details": {
+        "point": "Sorting_W"
+      },
+      "elapsed_s": 6.800000000000097
+    },
+    {
+      "index": 3,
+      "kind": "pick",
+      "params": {
+        "class": "cake",
+        "station": "W",
+        "attempts": 3
+      },
+      "outcome": "ok",
+      "reason": "",
+      "attempts": 2,
+      "details": {
+        "verdicts": [
+          {
+            "attempt": 1,
+            "action": "reframe",
+            "reason": "G4 target not approachable"
+          },
+          {
+            "attempt": 2,
+            "action": "pass",
+            "reason": "all checks passed"
+          }
+        ],
+        "confirmed_class": "cake"
+      },
+      "elapsed_s": 6.600000000000087
+    },
+    {
+      "index": 4,
+      "kind": "goto",
+      "params": {
+        "point": "Collection_A_approach",
+        "tol": 0.06
+      },
+      "outcome": "ok",
+      "reason": "",
+      "attempts": 1,
+      "details": {
+        "point": "Collection_A_approach"
+      },
+      "elapsed_s": 9.500000000000028
+    },
+    {
+      "index": 5,
+      "kind": "place",
+      "params": {
+        "zone": "A",
+        "level": 1
+      },
+      "outcome": "ok",
+      "reason": "",
+      "attempts": 1,
+      "details": {
+        "zone": "A",
+        "level": 1
+      },
+      "elapsed_s": 2.9999999999998295
+    },
+    {
+      "index": 6,
+      "kind": "verify",
+      "params": {
+        "class": "cake",
+        "zone": "A",
+        "timeout_s": 3.0
+      },
+      "outcome": "ok",
+      "reason": "",
+      "attempts": 1,
+      "details": {
+        "status": "verified",
+        "zone": "A"
+      },
+      "elapsed_s": 0.4999999999999716
+    }
+  ],
+  "sim": {
+    "t": 37.00000000000003,
+    "collisions": 0
+  },
+  "score": 3,
+  "score_detail": [
+    [
+      "A",
+      "cake",
+      2
+    ]
+  ],
+  "params": {
+    "max_linear_mps": 0.18,
+    "max_angular_rps": 0.75,
+    "lin_accel_mps2": 3.0,
+    "lin_decel_mps2": 5.0,
+    "ang_accel_rps2": 3.0,
+    "ang_decel_rps2": 8.0,
+    "pick_s": 4.0,
+    "place_s": 3.0
+  }
+}

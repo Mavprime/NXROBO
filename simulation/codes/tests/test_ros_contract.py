@@ -32,7 +32,7 @@ class GoalResolutionTests(unittest.TestCase):
 
     def test_sorting_points_face_centre(self):
         x, y, yaw = ros_contract.resolve_goal(self.world, "Sorting_N")
-        self.assertEqual((x, y), (1.5, 1.91))
+        self.assertEqual((x, y), (1.474, 1.972))
         self.assertAlmostEqual(yaw, -math.pi / 2)
         _, _, yaw_e = ros_contract.resolve_goal(self.world, "Sorting_E")
         self.assertAlmostEqual(abs(yaw_e), math.pi)

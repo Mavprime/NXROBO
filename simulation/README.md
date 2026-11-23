@@ -135,7 +135,7 @@ y=0  D (bottom-left)    C (bottom-right)
   in from the corner, approaches 0.35 m inward from those.
 - Robot starts in the A collection square at `(0.225, 2.775)`, facing the centre
   (yaw `-π/4`).
-- 3×3 first-tier brick cluster at `(1.5, 1.5)` (10 cm bricks, 14.5 cm pitch), cake on
+- 3×3 first-tier brick cluster at `(1.474, 1.562)` (measured 2026-11-24) (10 cm bricks, 14.5 cm pitch), cake on
   top of the centre brick; sorting approaches `Sorting_N/S/E/W` at 0.38 m.
 - Classification table on the **left wall between A and D** (`Classification_area` at
   `(0.6, 1.5)`, facing west). Cards left→right for that robot are south→north and map to

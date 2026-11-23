@@ -439,7 +439,7 @@ Level 0 acceptance:
    origin at the SW corner; A (0,3), B (3,3), C (3,0), D (0,0); collection centres
    0.225 m in from each corner; start in A at (0.225, 2.775). Confirm on the real field.
 2. **Station poses** — `Sorting_N/S/E/W` in `arena_map.yaml` are at
-   (1.5, 1.5 ± 0.38) / (1.5 ± 0.38, 1.5). Production also has `Sorting_M` for the cake, but the sim
+   (1.474, 1.562 ± 0.41) / (1.474 ± 0.41, 1.562). Production also has `Sorting_M` for the cake, but the sim
    has no `M`: the cake sits on the centre brick and is picked from any `Sorting_*`
    approach. Decide whether to add `M` to the map or change `CAKE_SORTING_STATION`.
 3. **Board read position** — `make_arena.py` puts the board on the sorting table on the
