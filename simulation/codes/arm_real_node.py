@@ -25,12 +25,16 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import threading
 import time
 
 import rospy
+import tf2_ros
+import yaml
 from std_msgs.msg import String
 from vision_msgs.msg import Detection2DArray
+from geometry_msgs.msg import Twist
 
 import grasp_generic
 import match_logic
@@ -51,7 +55,12 @@ class ArmReal:
         self.dry_run = bool(rospy.get_param("~dry_run", False))
         self.raw_detect = bool(rospy.get_param("~raw_detect", False))
         self.conf = float(rospy.get_param("~conf", 0.35))
+        self.creep_m = float(rospy.get_param("~creep_m", 0.03))
+        self._creeped = 0
+        self._turns = 0
         self.creep = bool(rospy.get_param("~creep", True))
+        self.turn_align = bool(rospy.get_param("~turn_align", True))
+        self.exit_back_m = float(rospy.get_param("~exit_back_m", 0.45))
         self.attempts = int(rospy.get_param("~attempts", grasp_generic.MAX_APPROACH_ATTEMPTS))
         cake_offset = float(rospy.get_param("~cake_offset", grasp_generic.CAKE_CUP_OFFSET_X))
 
@@ -69,6 +78,24 @@ class ArmReal:
         self._raw = []
         self.parked = False
 
+        # World-model cake gate: the real cake has a known map position; reject
+        # hypotheses that project far from it.
+        self.cake_xy = None
+        world_path = rospy.get_param("~world", os.path.expanduser("~/codes/config/arena_map.yaml"))
+        try:
+            with open(world_path) as fh:
+                world = yaml.safe_load(fh)
+            for brick in world.get("bricks", []):
+                if str(brick.get("type", "")).lower() == "cake":
+                    self.cake_xy = (float(brick["x"]), float(brick["y"]))
+                    break
+        except Exception as exc:
+            rospy.logwarn("arm real: cannot read world model (%s)", exc)
+        self.cake_pos_tol = float(rospy.get_param("~cake_pos_tol", 0.10))
+        self.contact_detect = bool(rospy.get_param("~contact_detect", True))
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
+
         if self.dry_run:
             rospy.logwarn("arm_real_node: DRY RUN - vacuum pump is disabled")
             self.arm.interface.set_pump = lambda enable: rospy.loginfo(
@@ -78,9 +105,9 @@ class ArmReal:
         rospy.Subscriber("/arm/pick", String, self._on_pick, queue_size=10)
         rospy.Subscriber("/arm/place", String, self._on_place, queue_size=10)
         rospy.Subscriber("/objects", Detection2DArray, self._on_raw_objects, queue_size=5)
-        rospy.loginfo("arm real ready: dry_run=%s creep=%s raw_detect=%s scale=%s "
+        rospy.loginfo("arm real ready: dry_run=%s creep=%s raw_detect=%s contact=%s scale=%s "
                       "cake_touch=%.1f cake_conf=%.2f cake_site_conf=%.2f"
-                      % (self.dry_run, self.creep, self.raw_detect, self.scale,
+                      % (self.dry_run, self.creep, self.raw_detect, self.contact_detect, self.scale,
                          self.cake_touch, self.cake_conf, self.cake_site_conf))
 
     # -- contract ----------------------------------------------------------
@@ -200,6 +227,37 @@ class ArmReal:
 
     # -- motions -----------------------------------------------------------
 
+    def _creep_forward(self, distance_m: float) -> None:
+        """Timed open-loop base move; allows steps below drive_base's 3 cm floor."""
+        distance_m = max(-0.50, min(0.50, float(distance_m)))
+        if abs(distance_m) < 0.005:
+            return
+        speed = 0.15 if distance_m > 0 else -0.15
+        duration = abs(distance_m) / abs(speed)
+        rate = 30.0
+        ros_rate = rospy.Rate(rate)
+        end = rospy.get_time() + duration
+        while rospy.get_time() < end and not rospy.is_shutdown():
+            msg = Twist(); msg.linear.x = speed
+            self.arm.cmd_vel_pub.publish(msg)
+            ros_rate.sleep()
+        for _ in range(2):
+            self.arm.cmd_vel_pub.publish(Twist())
+            rospy.sleep(0.05)
+        rospy.loginfo("creep: %+.0f mm at %.2f m/s" % (distance_m * 1000, speed))
+
+    def _target_map_xy(self, arm_x: float, arm_y: float):
+        tr = self.tf_buffer.lookup_transform(
+            "map", "base_footprint", rospy.Time(0), rospy.Duration(0.3))
+        p = tr.transform.translation
+        q = tr.transform.rotation
+        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y),
+                         1 - 2 * (q.y * q.y + q.z * q.z))
+        bx = (arm_x + 44.0) / 1000.0
+        by = arm_y / 1000.0
+        return (p.x + bx * math.cos(yaw) - by * math.sin(yaw),
+                p.y + bx * math.sin(yaw) + by * math.cos(yaw))
+
     def _safe_retract(self) -> None:
         """Pump off and home the arm after a failed or aborted pick."""
         try:
@@ -212,6 +270,8 @@ class ArmReal:
 
     def _pick(self, cid: int):
         cls = [k for k, v in CLASS_ID.items() if v == cid][0]
+        self._turns = 0
+        self._creeped = 0
         try:
             self.arm.interface.set_status(True)
             rospy.sleep(0.2)
@@ -239,12 +299,61 @@ class ArmReal:
                     target["mode"], x, y, z_est=target.get("z_est"), far=far)
                 rospy.loginfo("arm pick %s: target(%s)=(%.1f,%.1f) far=%s dist=%.1f in_reach=%s"
                               % (cls, attempt + 1, x, y, far, dist, in_reach))
+                if cid == match_logic.CAKE_ID and self.cake_xy is not None:
+                    try:
+                        mx, my = self._target_map_xy(x, y)
+                        d_cake = math.hypot(mx - self.cake_xy[0], my - self.cake_xy[1])
+                        if d_cake > self.cake_pos_tol:
+                            rospy.logwarn(
+                                "arm pick: cake hypothesis %.3f m from the expected "
+                                "cake (%.2f, %.2f) - ignored", d_cake, mx, my)
+                            if attempt + 1 < self.attempts:
+                                rospy.sleep(0.4)
+                                continue
+                            return False, "cake not at expected position"
+                    except Exception as exc:
+                        rospy.logwarn("arm pick: cake position check failed (%s)", exc)
+                bearing = math.atan2(y, x)
+                if in_reach and self.turn_align and abs(bearing) > math.radians(4.0) \
+                        and self._turns < 2:
+                    rospy.loginfo("arm pick: target bearing %+.1f deg; aligning base"
+                                  % math.degrees(bearing))
+                    self.arm.turn_base(bearing)
+                    self._turns += 1
+                    rospy.sleep(0.5)
+                    continue
+                if self.creep and in_reach and x > 342.0 and self._creeped < 2:
+                    rospy.loginfo("arm pick: cake at the arm limit (x=%.1f); "
+                                  "creeping %.0f mm forward to centre the cup"
+                                  % (x, self.creep_m * 1000))
+                    self._creep_forward(self.creep_m)
+                    self._creeped += 1
+                    self.parked = True
+                    rospy.sleep(0.6)
+                    continue
                 if in_reach:
                     try:
                         plan = grasp_generic.plan_grasp(target, self.cake_touch)
                     except Exception as exc:
                         self._safe_retract()
                         return False, "plan: %s" % exc
+                    if cid == match_logic.CAKE_ID and self.contact_detect:
+                        try:
+                            import cake_final
+                            z_contact, _trace = cake_final.descend_until_contact(
+                                self.arm, self.bridge, cake_final.M,
+                                plan.x, plan.y, plan.z_approach,
+                                max(-60.0, plan.z_touch - 40.0))
+                            if z_contact is not None:
+                                plan.z_touch = max(z_contact - 2.0, -60.0)
+                                plan.z_lift = min(plan.z_touch + 45.0, 100.0)
+                                rospy.loginfo(
+                                    "arm pick: contact at z=%.1f -> touch z=%.1f"
+                                    % (z_contact, plan.z_touch))
+                            else:
+                                rospy.logwarn("arm pick: contact not found; using memory z")
+                        except Exception as exc:
+                            rospy.logwarn("arm pick: contact detection failed (%s)", exc)
                     # return_cube=False leaves the cube attached and the pump ON.
                     grasp_generic.execute_sequence(
                         self.arm, plan, hold_seconds=0.5, return_cube=False)
@@ -257,6 +366,11 @@ class ArmReal:
                         self._safe_retract()
                         return False, "grasp MISS"
                     self.arm.interface.set_pose(*CARRY_POSE, delay=0.9)
+                    if self.exit_back_m > 0.01:
+                        rospy.loginfo("arm pick: exit maneuver, backing out %.2f m",
+                                      self.exit_back_m)
+                        self._creep_forward(-abs(self.exit_back_m))
+                        rospy.sleep(0.5)
                     return True, ""
                 if not self.creep:
                     self._safe_retract()
