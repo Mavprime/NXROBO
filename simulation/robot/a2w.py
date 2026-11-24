@@ -80,8 +80,8 @@ def wrap(a: float) -> float:
 
 
 class A2W:
-    def __init__(self) -> None:
-        rospy.init_node("a2w")
+    def __init__(self, node_name: str = "a2w") -> None:
+        rospy.init_node(node_name)
         self.scan = None
         self.odom = None
         rospy.Subscriber("/scan", LaserScan, lambda m: setattr(self, "scan", m))
@@ -94,6 +94,8 @@ class A2W:
         if self.scan is None or self.odom is None:
             raise RuntimeError("no /scan or /odom")
         self.yaw0 = self.yaw()
+        self.odom0 = (self.odom.pose.pose.position.x,
+                      self.odom.pose.pose.position.y)
         self.h0 = 0.0
 
     # ---- plumbing ---------------------------------------------------------
@@ -387,6 +389,77 @@ class A2W:
                  % (math.hypot(x - sx, y - sy), self.dist(phi_map), self.h()))
         return ok
 
+    # ---- wall-closed-loop goto -------------------------------------------
+    def odom_pose_map(self):
+        """Map pose from odometry since the wall-fixed start."""
+        o = self.odom
+        q = o.pose.pose.orientation
+        yaw = math.atan2(2 * (q.w * q.z), 1 - 2 * q.z * q.z)
+        th = math.radians(self.h0 - math.degrees(self.yaw0))
+        dx = o.pose.pose.position.x - self.odom0[0]
+        dy = o.pose.pose.position.y - self.odom0[1]
+        return (self.pos0[0] + dx * math.cos(th) - dy * math.sin(th),
+                self.pos0[1] + dx * math.sin(th) + dy * math.cos(th))
+
+    def wall_xy_lines(self):
+        """(x, y) from the wall-LINE perpendicular distances.
+
+        A range read in a map-bearing cone (dist()) is stretched when the
+        heading estimate is off, which is what drove the diagonal 37 cm south
+        on 2026-11-24. The line fits give the perpendicular distance to the
+        wall directly, so they do not care about the heading error; the only
+        heading-dependent part is assigning each line to an axis, and that is
+        robust for the few-degree skew.
+        """
+        lines = self.wall_lines() or []
+        h = self.h()
+        sides = {}
+        for bearing, dist, _count in lines:
+            mb = (bearing + h) % 360.0
+            for axis, role in ((0.0, "east"), (180.0, "west"),
+                               (90.0, "north"), (270.0, "south")):
+                if role in sides:
+                    continue
+                if abs(((mb - axis + 180.0) % 360.0) - 180.0) < 30.0:
+                    sides[role] = dist
+                    break
+        x = y = None
+        if "west" in sides:
+            x = WALL_OFF + sides["west"]
+        elif "east" in sides:
+            x = MAP_TOP - sides["east"]
+        if "north" in sides:
+            y = MAP_TOP - sides["north"]
+        elif "south" in sides:
+            y = WALL_OFF + sides["south"]
+        return x, y
+
+    def goto_wall(self, target, tol: float = 0.03, vmax: float = 0.14,
+                  timeout: float = 120.0, guard: float = 0.15) -> None:
+        """Straight leg on odometry, then wall-line corrections to the point."""
+        ex, ey = target[0] - self.pos0[0], target[1] - self.pos0[1]
+        dist = math.hypot(ex, ey)
+        bearing = math.degrees(math.atan2(ey, ex))
+        self.log("goto: turn %.1f, drive %.3f m" % (bearing, dist))
+        self.turn_to(bearing)
+        moved = self.drive(dist, vmax=vmax, timeout=timeout, guard=guard)
+        self.log("goto: odom moved %.3f m" % moved)
+        for i in range(4):
+            x, y = self.wall_xy_lines()
+            if x is None or y is None:
+                self.log("goto: wall fix incomplete (%s, %s)" % (x, y))
+                break
+            dx, dy = target[0] - x, target[1] - y
+            d = math.hypot(dx, dy)
+            self.log("goto fix %d: (%.3f, %.3f) err %.3f m" % (i + 1, x, y, d))
+            if d <= tol:
+                break
+            b = math.degrees(math.atan2(dy, dx))
+            self.turn_to(b)
+            self.drive(min(d, 0.30), vmax=min(vmax, 0.06), timeout=25,
+                       guard=0.12)
+        self.stop()
+
     # ---- W fix ------------------------------------------------------------
     def wall_x(self, d_west: float):
         """Map x from the known west-side surface, or (None, reason)."""
@@ -439,9 +512,6 @@ class A2W:
     # ---- scenario ---------------------------------------------------------
     def run(self) -> None:
         self.init_heading()
-        # the two wall lines give the pose directly; re-measuring each wall by
-        # bearing afterwards is what put y 47 cm out (a skewed wall's normal is
-        # not the map axis) - use the hypothesis pose.
         x, y = self.pos0
         self.log("start pos = (%.3f, %.3f)  [A is %s]  offset %.1f cm, heading %.1f"
                  % (x, y, A_XY, 100 * math.hypot(x - A_XY[0], y - A_XY[1]),
@@ -449,37 +519,24 @@ class A2W:
         if math.hypot(x - A_XY[0], y - A_XY[1]) > 0.30:
             raise RuntimeError("not at A - refusing to drive (%.2f, %.2f)" % (x, y))
 
-        # 1. east along the north wall to the clear lane x = 0.95. The west-wall
-        #    range pins x regardless of the few-degree heading error, and the
-        #    classification table (y 1.30-1.70) is far from this leg.
-        self.turn_to(0 if x < TRANSIT_X else 180)
-        self.drive_until_far(180, TRANSIT_X - WALL_OFF, vmax=0.06, timeout=60)
+        # straight diagonal A -> W, closed on the wall distances
+        self.log("diagonal A -> W: target (%.3f, %.3f), bearing %.1f deg, %.2f m"
+                 % (W_XY[0], W_XY[1],
+                    math.degrees(math.atan2(W_XY[1] - y, W_XY[0] - x)),
+                    math.hypot(W_XY[0] - x, W_XY[1] - y)))
+        self.goto_wall(W_XY, tol=0.04, vmax=0.14, timeout=90)
 
-        # 2. south until the south wall is 1.675 m away -> y = 1.500 exactly
-        self.turn_to(270)                                 # face south
-        self.drive_until(270, W_XY[1] - WALL_OFF, vmax=0.05, timeout=120)
-
-        # 3. east into W. Measure x from the west-side surface first: at this
-        #    y the reading is the classification table east face (x=0.33) or,
-        #    if the table is missed, the west wall - both pin x.
-        self.turn_to(0)                                   # face east
-        x_now, src = self.wall_x(self.dist(180))
-        if x_now is None:
-            self.log("no west-side fix before W (%s): assuming x=%.2f"
-                     % (src, TRANSIT_X))
-            x_now = TRANSIT_X
-        dx = W_XY[0] - x_now
-        self.log("approach x: %.3f (%s) -> W %.3f (dx %.3f)"
-                 % (x_now, src, W_XY[0], dx))
-        if abs(dx) > 0.02:
-            self.turn_to(0 if dx > 0 else 180)
-            self.drive(abs(dx), vmax=0.04, timeout=30)
         self.turn_to(W_HEADING)
-
-        # 4. wall fix at W, correct, finish facing the cluster
-        self.correct_at_W()
+        xf, yf = self.wall_xy_lines()
+        self.log("AT W: wall pose (%.3f, %.3f)  target (%.3f, %.3f)  error %.1f cm,"
+                 " heading %.1f"
+                 % (xf if xf is not None else float("nan"),
+                    yf if yf is not None else float("nan"),
+                    W_XY[0], W_XY[1],
+                    100 * math.hypot((xf or W_XY[0]) - W_XY[0],
+                                     (yf or W_XY[1]) - W_XY[1]), self.h()))
         self.stop()
-        self.log("DONE")
+        self.log("DONE - at W, arm empty. Check the pose before the pick.")
 
 
 def main() -> None:
