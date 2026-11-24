@@ -2,15 +2,46 @@
 """
 Keyboard teleop for the Spark-H base + the 4-DOF uArm (base, shoulder, elbow).
 
-Base (hold for continuous motion - terminal key repeat):
+Base (browser bridge - exact hold duration):
+    Run keyboard_web.py on the robot, forward port 8766 over SSH, then open
+    http://127.0.0.1:8766/. Hold W/S to drive and A/D to turn; a key-up sends
+    an immediate zero state, so the base moves for exactly as long as the key
+    was held. A 0.25 s input watchdog and the page's focus-loss disarm stop the
+    base if the browser goes away.
+
+Base (terminal fallback - used only when no bridge client is attached):
     w  forward          s  backward
     a  turn left        d  turn right
+    SSH terminals report no key-up, so this path approximates a hold from key
+    repeats and a single w/s tap still coasts for TERM_FIRST_REPEAT. Use the
+    browser bridge for true hold-to-move.
 
 Arm (ramped joint jogging at a tip speed up to ARM_JOG_SPEED, plus combos):
     4  base rotate left          6  base rotate right
     7  raise upper arm           9  lower upper arm
     8  extend forearm            2  fold forearm
     q  7 + 8    e  7 + 2    z  9 + 8    c  9 + 2
+
+Automatic pickup:
+    1      pick up the first block: approach above it, descend vertically at
+           the pickup X/Y, vacuum ON, wait SUCTION_DELAY_S, lift vertically,
+           then move to the carry pose. Non-blocking state machine driven by
+           the same 20 Hz loop. Any arm/base key, Space, 0, or Ctrl+C cancels
+           it. A second 1 while it runs is ignored; a plain terminal must
+           release 1 (or pause TERM_ACTION_GAP) before 1 can start it again.
+           PICKUP_X_MM / PICKUP_Y_MM are required: the block position belongs
+           to the field, not to the arm, so it cannot be guessed here.
+
+           Heights use the driver's wrist frame, not the floor. The field
+           calibration in auto/codes (calib3d.py operator anchors,
+           pick_direct.py) puts the floor at FLOOR_Z_MM ~= -150 mm, and
+           auto/codes/runtask.py contact_heights() documents that the suction
+           cup's sealing rim is SUCTION_PAD_MM ~= 8 mm below the wrist pose.
+           A block of height H on the floor is therefore contacted at
+               wrist z = FLOOR_Z + H + SUCTION_PAD - SUCTION_PRESS
+           The pump has no pressure/suction feedback on this robot, so the
+           routine can only confirm the command sequence, never that the
+           block is actually attached.
 
 Other:
     Enter  toggle the vacuum pump and lift straight up when switching it on
@@ -108,6 +139,21 @@ Environment overrides:
     MAX_LIN_DECEL=4.0          m/s^2
     MAX_ANG_ACCEL=6.0          rad/s^2
     MAX_ANG_DECEL=10.0         rad/s^2
+    BODY_PORT=8765             loopback port keyboard_web.py streams key states to
+    BODY_WATCHDOG=0.25         s without browser input before the base is stopped
+    PICKUP_X_MM / PICKUP_Y_MM  block suction point in arm coordinates (required)
+    BLOCK_HEIGHT_MM=150        measured block height above the floor
+    FLOOR_Z_MM=-150            measured model z of the floor
+    SUCTION_PAD_MM=8           cup rim distance below the wrist pose
+    SUCTION_PRESS_MM=3         extra descent to compress the cup
+    APPROACH_HEIGHT_MM=100     approach height above the contact point
+    LIFT_HEIGHT_MM=80          vertical lift above the contact point
+    CARRY_X_MM/CARRY_Y_MM/CARRY_Z_MM
+                               carry pose (default: pickup X/Y and lift height)
+    SUCTION_DELAY_S=0.8        pump dwell at contact before lifting
+    PICKUP_SPEED_MM_S=120      tip speed for the pickup moves
+    PICKUP_TOL_MM=1.0          arrival tolerance for the pickup stages
+    PICKUP_STAGE_TIMEOUT_S=15  abort a pickup stage that takes longer
     TERM_FIRST_REPEAT=0.95     s a fresh w/s key is held before release
     TERM_REPEAT_TIMEOUT=0.32   s between repeats before the base is released
     TURN_TAP_MIN=0.20          s a quick a/d tap rotates (keeps taps small)
@@ -125,10 +171,12 @@ Environment overrides:
     MAX_REACH=350              max radial distance of the tip from the base axis, mm
 """
 
+import json
 import math
 import os
 import re
 import select
+import socket
 import sys
 import termios
 import threading
@@ -179,6 +227,13 @@ MAX_LIN_DECEL = float(os.environ.get("MAX_LIN_DECEL", "4.0"))
 MAX_ANG_ACCEL = float(os.environ.get("MAX_ANG_ACCEL", "6.0"))
 MAX_ANG_DECEL = float(os.environ.get("MAX_ANG_DECEL", "10.0"))
 
+# Browser base bridge: keyboard_web.py (running on the robot) forwards real
+# key-down/key-up state here as newline-delimited JSON, so the base moves for
+# exactly as long as a key is held. The terminal pulse path stays as fallback.
+BASE_HOST = "127.0.0.1"
+BASE_PORT = int(os.environ.get("BODY_PORT", "8765"))
+BODY_WATCHDOG = float(os.environ.get("BODY_WATCHDOG", "0.25"))
+
 TERM_FIRST_REPEAT = float(os.environ.get("TERM_FIRST_REPEAT", "0.95"))
 TERM_REPEAT_TIMEOUT = float(os.environ.get("TERM_REPEAT_TIMEOUT", "0.32"))
 # a/d turn in short pulses so one tap is only a few degrees.
@@ -204,6 +259,72 @@ if not (math.isfinite(BASE_YAW_SPEED) and BASE_YAW_SPEED > 0.0):
 ARM_JOG_SPEED = float(os.environ.get("ARM_JOG_SPEED", "120"))
 if not (math.isfinite(ARM_JOG_SPEED) and ARM_JOG_SPEED > 0.0):
     sys.exit("Arm jog speed must be a finite positive number of mm/s.")
+
+
+# ---------------------------------------------------------------------------
+# Automatic block pickup (key 1)
+# ---------------------------------------------------------------------------
+# Coordinate reference: fk()/ik() z is the uArm wrist pose in the driver's
+# frame (mm), not a floor-relative height. Two measured offsets turn a floor
+# height into a wrist target:
+#   * FLOOR_Z_MM - model z of the physical floor. Field calibration in
+#     auto/codes (calib3d.py operator anchors, pick_direct.py) measured about
+#     -150 mm for this robot.
+#   * SUCTION_PAD_MM - the rubber cup's sealing rim sits this far below the
+#     wrist pose. auto/codes/runtask.py contact_heights() states that the wrist
+#     must stop PAD_THICKNESS_MM (8) above a surface for the rim to meet it.
+# A block standing on the floor therefore needs the wrist at
+#     FLOOR_Z + BLOCK_HEIGHT + SUCTION_PAD
+# and a little lower (SUCTION_PRESS_MM) so the cup compresses and seals.
+# The block's X/Y are a property of the field, not the arm, so they have no
+# default: measure them and pass PICKUP_X_MM / PICKUP_Y_MM.
+def _env_optional_float(name):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        sys.exit("%s must be a number of millimetres." % name)
+
+
+def _env_positive_float(name, default):
+    value = float(os.environ.get(name, default))
+    if not (math.isfinite(value) and value > 0.0):
+        sys.exit("%s must be a finite positive number." % name)
+    return value
+
+
+def _env_nonnegative_float(name, default):
+    value = float(os.environ.get(name, default))
+    if not (math.isfinite(value) and value >= 0.0):
+        sys.exit("%s must be a finite, nonnegative number." % name)
+    return value
+
+
+BLOCK_HEIGHT_MM = _env_positive_float("BLOCK_HEIGHT_MM", "150")
+FLOOR_Z_MM = float(os.environ.get("FLOOR_Z_MM", "-150"))
+if not math.isfinite(FLOOR_Z_MM):
+    sys.exit("FLOOR_Z_MM must be a finite number.")
+SUCTION_PAD_MM = _env_positive_float("SUCTION_PAD_MM", "8")
+SUCTION_PRESS_MM = _env_nonnegative_float("SUCTION_PRESS_MM", "3")
+APPROACH_HEIGHT_MM = _env_positive_float("APPROACH_HEIGHT_MM", "100")
+LIFT_HEIGHT_MM = _env_positive_float("LIFT_HEIGHT_MM", "80")
+SUCTION_DELAY_S = _env_nonnegative_float("SUCTION_DELAY_S", "0.8")
+PICKUP_SPEED_MM_S = _env_positive_float("PICKUP_SPEED_MM_S", str(ARM_JOG_SPEED))
+PICKUP_TOL_MM = _env_positive_float("PICKUP_TOL_MM", "1.0")
+PICKUP_STAGE_TIMEOUT_S = _env_positive_float("PICKUP_STAGE_TIMEOUT_S", "15")
+
+PICKUP_X_MM = _env_optional_float("PICKUP_X_MM")
+PICKUP_Y_MM = _env_optional_float("PICKUP_Y_MM")
+CARRY_X_MM = _env_optional_float("CARRY_X_MM")
+CARRY_Y_MM = _env_optional_float("CARRY_Y_MM")
+CARRY_Z_MM = _env_optional_float("CARRY_Z_MM")
+
+#: Wrist z where the cup rim meets the top of a floor block (mm).
+PICKUP_CONTACT_Z_MM = (
+    FLOOR_Z_MM + BLOCK_HEIGHT_MM + SUCTION_PAD_MM - SUCTION_PRESS_MM
+)
 
 PUMP_LIFT_DELAY = float(os.environ.get("PUMP_LIFT_DELAY", "0.35"))
 if not (math.isfinite(PUMP_LIFT_DELAY) and PUMP_LIFT_DELAY >= 0.0):
@@ -232,7 +353,7 @@ COMBO_KEYS = {"q": "78", "e": "72", "z": "98", "c": "92"}
 BASE_KEYS = "wasd"
 ATTACH_KEY = "m"
 # Ctrl+C and the action keys, plus the keys forwarded to the base and arm.
-CONTROL_KEYS = "\x03" + ATTACH_KEY + "0\r\n " + BASE_KEYS
+CONTROL_KEYS = "\x03" + ATTACH_KEY + "0\r\n " + BASE_KEYS + "1"
 ACCEPTED_KEYS = set(JOG_KEYS) | set(COMBO_KEYS) | set(CONTROL_KEYS)
 KITTY_KEY = re.compile(rb"(\d+)(?::[\d:]*)?(?:;(\d+)(?::([123]))?)?(?:;[\d:]*)?u")
 CSI_END = re.compile(rb"[\x40-\x7e]")
@@ -442,11 +563,15 @@ from geometry_msgs.msg import Twist
 from swiftpro.msg import SwiftproState, position, status
 
 HELP = """
-  Base:  w forward   s backward   a turn left   d turn right   (hold)
+  Base:  browser bridge (keyboard_web.py), OR terminal w/a/s/d
+         bridge: run keyboard_web.py on the robot; ssh -L 8766:127.0.0.1:8766;
+                 open http://127.0.0.1:8766/ and hold W/S/A/D (real key-up)
+  Base:  w forward   s backward   a turn left   d turn right   (terminal)
   Arm:   4 base left   6 base right
          7 upper arm up   9 upper arm down
          8 extend forearm  2 fold forearm        (jog tip speed up to %g mm/s)
   Combo: q = 7+8   e = 7+2   z = 9+8   c = 9+2
+  Auto:  1 automatic block pickup (any movement key / Space / 0 cancels)
   Other: Enter pump ON + lift / OFF   Space cancel lift
          m re-attach arm   0 release + home   Ctrl+C stop all
 """
@@ -466,6 +591,24 @@ def toward(current, target, accel, decel, dt):
     if abs(diff) <= max_change:
         return target
     return current + math.copysign(max_change, diff)
+
+
+def parse_base_state(raw):
+    """Decode one keyboard_web.py state packet into (linear, turn, stop)."""
+    if len(raw) > 1024:
+        return None
+    try:
+        msg = json.loads(raw.decode("ascii"))
+    except (ValueError, UnicodeError):
+        return None
+    if not isinstance(msg, dict) or msg.get("kind") != "state":
+        return None
+    linear, turn, stop = msg.get("linear"), msg.get("turn"), msg.get("stop")
+    if (type(linear) is not int or linear not in (-1, 0, 1) or
+            type(turn) is not int or turn not in (-1, 0, 1) or
+            type(stop) is not bool):
+        return None
+    return linear, turn, stop
 
 
 def jog_directions(keys):
@@ -669,6 +812,228 @@ class VerticalLift:
         return fk(*joints)
 
 
+class PickupAbort(Exception):
+    """A pickup stage hit an invalid pose or stopped making progress."""
+
+
+class PickupRoutine:
+    """Non-blocking automatic block pickup, driven from the 20 Hz loop.
+
+    Stages: APPROACH (joint move above the block) -> DESCEND (vertical to the
+    contact height) -> SUCTION (pump command + dwell) -> LIFT (vertical clear
+    of the block) -> CARRY (joint move to the carry pose). ``step()`` returns
+    the pose to publish when the arm moved; it never sleeps.
+
+    Before the first motion every waypoint goes through ik() and check_pose();
+    if any is unusable the routine refuses to start. While moving,
+    Arm.jog_axes()/vertical_joints() re-check every intermediate pose and a
+    rejected step aborts the routine at its last valid pose.
+
+    There is no suction feedback on this robot: /pump_topic commands the
+    valve, and SwiftproState.pump only echoes that command. "COMPLETE" means
+    the sequence finished with the pump commanded ON - not that the block is
+    attached.
+    """
+
+    APPROACH, DESCEND, SUCTION, LIFT, CARRY, DONE = range(6)
+    NAMES = ("approach", "descend", "suction", "lift", "carry", "done")
+
+    def __init__(self, arm, pump_command):
+        self.arm = arm
+        self.pump_command = pump_command
+        self.active = False
+        self.stage = None
+        self.stage_at = 0.0
+        self.speed = 0.0
+        self.plan = {}
+        self.x = self.y = 0.0
+        self.contact_z = 0.0
+        self.lift_z = 0.0
+
+    @staticmethod
+    def _checked_joints(pose):
+        """ik() + check_pose() for one Cartesian waypoint."""
+        joints = ik(*pose)
+        if joints is None:
+            return None, "IK has no solution"
+        reason = check_pose(joints)
+        if reason is not None:
+            return None, reason
+        return tuple(joints), None
+
+    def start(self, now):
+        if self.active:
+            return False
+        if PICKUP_X_MM is None or PICKUP_Y_MM is None:
+            safe_print(
+                "pickup needs PICKUP_X_MM and PICKUP_Y_MM (the block position "
+                "in arm coordinates). Jog over the block, read "
+                "/SwiftproState_topic, restart with those values. Nothing was "
+                "commanded."
+            )
+            return False
+        if not self.arm.synced:
+            safe_print("pickup needs a known arm pose - press 0 once, then 1.")
+            return False
+
+        x, y = PICKUP_X_MM, PICKUP_Y_MM
+        contact_z = PICKUP_CONTACT_Z_MM
+        lift_z = contact_z + LIFT_HEIGHT_MM
+        carry = (
+            x if CARRY_X_MM is None else CARRY_X_MM,
+            y if CARRY_Y_MM is None else CARRY_Y_MM,
+            lift_z if CARRY_Z_MM is None else CARRY_Z_MM,
+        )
+        waypoints = (
+            ("approach", (x, y, contact_z + APPROACH_HEIGHT_MM)),
+            ("contact", (x, y, contact_z)),
+            ("lift", (x, y, lift_z)),
+            ("carry", carry),
+        )
+        plan = {}
+        for name, pose in waypoints:
+            joints, reason = self._checked_joints(pose)
+            if joints is None:
+                safe_print(
+                    "pickup refused: %s pose (%.1f, %.1f, %.1f) rejected: %s"
+                    % ((name,) + pose + (reason,))
+                )
+                return False
+            plan[name] = joints
+
+        self.plan = plan
+        self.x, self.y = x, y
+        self.contact_z, self.lift_z = contact_z, lift_z
+        self.speed = 0.0
+        self.stage = self.APPROACH
+        self.stage_at = now
+        self.active = True
+        safe_print(
+            "PICKUP START  block %.0f mm  contact wrist z=%.1f  approach z=%.1f"
+            % (BLOCK_HEIGHT_MM, contact_z, contact_z + APPROACH_HEIGHT_MM)
+        )
+        return True
+
+    def cancel(self, reason):
+        """Stop issuing motion; the pump is left exactly as it is."""
+        if not self.active:
+            return False
+        self.active = False
+        self.stage = None
+        safe_print(
+            "pickup canceled (%s) - arm holds its last pose, pump unchanged"
+            % reason
+        )
+        return True
+
+    def _abort(self, reason):
+        self.active = False
+        self.stage = None
+        safe_print(
+            "PICKUP ABORTED: %s - arm holds its last valid pose, pump unchanged"
+            % reason
+        )
+
+    def _enter(self, stage, now):
+        self.stage = stage
+        self.stage_at = now
+        self.speed = 0.0
+
+    def step(self, now, dt):
+        """Advance one tick; return the pose to publish, or None."""
+        if not self.active:
+            return None
+        if (
+            self.stage != self.SUCTION
+            and now - self.stage_at > PICKUP_STAGE_TIMEOUT_S
+        ):
+            self._abort("stage '%s' timed out" % self.NAMES[self.stage])
+            return None
+        try:
+            if self.stage == self.APPROACH:
+                if self._joint_move(self.plan["approach"], dt):
+                    return fk(*self.arm.current)
+                self._enter(self.DESCEND, now)
+                safe_print("pickup: above the block, descending")
+            elif self.stage == self.DESCEND:
+                if self._vertical_move(self.contact_z, dt):
+                    return fk(*self.arm.current)
+                self._enter(self.SUCTION, now)
+                self.pump_command(True)
+                safe_print(
+                    "pickup: at contact z=%.1f - PUMP ON, waiting %.2f s "
+                    "(no suction feedback exists)" % (self.contact_z, SUCTION_DELAY_S)
+                )
+            elif self.stage == self.SUCTION:
+                if now - self.stage_at < SUCTION_DELAY_S:
+                    return None
+                self._enter(self.LIFT, now)
+                safe_print("pickup: lifting")
+            elif self.stage == self.LIFT:
+                if self._vertical_move(self.lift_z, dt):
+                    return fk(*self.arm.current)
+                self._enter(self.CARRY, now)
+                safe_print("pickup: clear of the block, moving to the carry pose")
+            elif self.stage == self.CARRY:
+                if self._joint_move(self.plan["carry"], dt):
+                    return fk(*self.arm.current)
+                self.active = False
+                self.stage = self.DONE
+                safe_print(
+                    "PICKUP COMPLETE - pump stays ON; suction is NOT verified "
+                    "(no pressure sensor on this robot)."
+                )
+        except PickupAbort as exc:
+            self._abort(str(exc))
+        return None
+
+    def _joint_move(self, target, dt):
+        """Move all three joints toward target; True while still moving."""
+        error = max(abs(a - b) for a, b in zip(self.arm.current, target))
+        if error <= 0.1:
+            return False
+        remaining = distance(fk(*self.arm.current), fk(*target))
+        self.speed = min(
+            PICKUP_SPEED_MM_S,
+            self.speed + JOG_ACCEL * dt,
+            math.sqrt(2.0 * JOG_ACCEL * max(remaining, 0.0)),
+        )
+        deltas = [b - a for a, b in zip(self.arm.current, target)]
+        result = self.arm.jog_axes(deltas, tip_step=max(self.speed * dt, 0.5))
+        if result is None:
+            raise PickupAbort("arm is not synced")
+        moved, reason = result
+        if reason:
+            raise PickupAbort(reason)
+        if not moved and max(
+            abs(a - b) for a, b in zip(self.arm.current, target)
+        ) > 0.1:
+            raise PickupAbort("no progress toward the target joints")
+        return moved
+
+    def _vertical_move(self, goal_z, dt):
+        """Vertical Cartesian path at the pickup X/Y; True while moving."""
+        current_z = fk(*self.arm.current)[2]
+        remaining = abs(goal_z - current_z)
+        if remaining <= PICKUP_TOL_MM:
+            return False
+        direction = 1.0 if goal_z > current_z else -1.0
+        self.speed = min(
+            PICKUP_SPEED_MM_S,
+            self.speed + JOG_ACCEL * dt,
+            math.sqrt(2.0 * JOG_ACCEL * remaining),
+        )
+        step = min(max(self.speed * dt, 0.5), remaining)
+        next_z = current_z + direction * step
+        joints = vertical_joints(self.x, self.y, next_z)
+        if joints is None:
+            raise PickupAbort(
+                "vertical path blocked at z=%.1f (joint/kinematic limit)" % next_z
+            )
+        self.arm.sync_to(joints)
+        return True
+
+
 class TerminalKeys:
     """Decode plain keys and Kitty press, repeat and release messages."""
 
@@ -830,6 +1195,22 @@ def main():
     pump_pub = rospy.Publisher("/pump_topic", status, queue_size=1)
     status_pub = rospy.Publisher("/swiftpro_status_topic", status, queue_size=1)
 
+    # Optional browser bridge for exact base key-down/key-up. If the port is
+    # already in use (another teleop), keep running with the terminal fallback.
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind((BASE_HOST, BASE_PORT))
+        listener.listen(1)
+        listener.setblocking(False)
+    except OSError as exc:
+        listener.close()
+        listener = None
+        safe_print(
+            "WARNING: base bridge port %d unavailable (%s); terminal fallback only."
+            % (BASE_PORT, exc)
+        )
+
     arm = Arm()
     saved = load_saved_pose()
     if saved is not None:
@@ -920,6 +1301,33 @@ def main():
     print(
         "  base: %.2f m/s / %.2f rad/s" % (LIN_SPEED, ANG_SPEED)
     )
+    if listener is not None:
+        print(
+            "  base bridge: keyboard_web.py -> 127.0.0.1:%d "
+            "(hold = move for exactly that long)" % BASE_PORT
+        )
+    else:
+        print("  base bridge: disabled (port busy); terminal repeat fallback only")
+    print("  arm and pump keys remain terminal-only; the bridge drives the base.")
+    if PICKUP_X_MM is None or PICKUP_Y_MM is None:
+        print(
+            "  pickup (1): NOT configured - measure the block and set "
+            "PICKUP_X_MM and PICKUP_Y_MM"
+        )
+    else:
+        print(
+            "  pickup (1): block x=%.0f y=%.0f  contact wrist z=%.1f "
+            "(floor %.0f + block %.0f + pad %.0f - press %.0f)"
+            % (
+                PICKUP_X_MM,
+                PICKUP_Y_MM,
+                PICKUP_CONTACT_Z_MM,
+                FLOOR_Z_MM,
+                BLOCK_HEIGHT_MM,
+                SUCTION_PAD_MM,
+                SUCTION_PRESS_MM,
+            )
+        )
     print(
         "  arm limits: base %.1f..%.1f  shoulder %.0f..%.0f  elbow %.0f..%.0f"
         % (A0_LIMITS + A1_LIMITS + A2_LIMITS)
@@ -960,6 +1368,57 @@ def main():
         repeat_timeout=TERM_REPEAT_TIMEOUT,
         tap_min=TURN_TAP_MIN,
     )
+
+    # Browser bridge connection state.
+    client = None
+    buffer = b""
+    net_linear = net_turn = 0
+    net_stop = False
+    net_last = 0.0
+
+    def stop_base_now():
+        """Zero every base target, including the browser's, and publish stop."""
+        nonlocal target_linear, target_turn, actual_linear, actual_turn
+        nonlocal net_linear, net_turn
+        target_linear = target_turn = 0.0
+        actual_linear = actual_turn = 0.0
+        net_linear = net_turn = 0
+        set_base(0.0, 0.0)
+
+    def close_base_client(message):
+        """Drop the browser stream, stop the base, re-interlock the terminal."""
+        nonlocal client, buffer, net_linear, net_turn, net_stop, net_last
+        nonlocal term_interlock, term_last_movement
+        if client is not None:
+            try:
+                client.close()
+            except OSError:
+                pass
+            client = None
+        buffer = b""
+        net_linear = net_turn = 0
+        net_stop = False
+        net_last = 0.0
+        stop_base_now()
+        # Terminal base keys must go quiet before they can move the base again.
+        term_interlock = True
+        term_last_movement = time.monotonic()
+        if message:
+            safe_print(message)
+
+    def pump_command(on):
+        """Pump command that also keeps the terminal Enter/0 state in sync."""
+        nonlocal pump_on
+        pump_on = on
+        set_pump(on)
+
+    pickup = PickupRoutine(arm, pump_command)
+    # Plain terminals have no key-up: a held 1 that repeats must not restart
+    # the routine after it finishes. The latch clears after TERM_ACTION_GAP of
+    # silence (or immediately on a Kitty release).
+    pickup_key_seen = -100.0
+    pickup_wait_release = False
+
     last_loop = time.monotonic()
     rate = rospy.Rate(1.0 / JOG_PERIOD)
 
@@ -978,8 +1437,18 @@ def main():
             dt = min(max(now - last_loop, 0.0), 0.1)
             last_loop = now
 
-            ready, _, _ = select.select([sys.stdin], [], [], 0)
-            if ready:
+            # Re-arm pickup key 1 once the terminal has been quiet, so the
+            # repeats of a held key cannot start a second routine.
+            if pickup_wait_release and now - pickup_key_seen > TERM_ACTION_GAP:
+                pickup_wait_release = False
+
+            watched = [sys.stdin]
+            if listener is not None:
+                watched.append(listener)
+            if client is not None:
+                watched.append(client)
+            ready, _, _ = select.select(watched, [], [], 0)
+            if sys.stdin in ready:
                 data = os.read(fd, 4096)
                 if not data:
                     break
@@ -999,16 +1468,42 @@ def main():
 
                     if key in JOG_KEYS or key in COMBO_KEYS:
                         lift.stop()
+                        pickup.cancel("manual arm input")
                         term_last_movement = now
                         held_keys.update(key, event, now)
                         continue
 
                     if key in BASE_KEYS:
                         term_last_movement = now
+                        pickup.cancel("base input")
+                        if client is not None:
+                            continue  # the browser bridge owns the base
                         if key in "ws":
                             move_keys.update(key, event, now)
                         else:
                             turn_keys.update(key, event, now)
+                        continue
+
+                    if key == "1":
+                        pickup_key_seen = now
+                        if event == 3:  # Kitty release
+                            pickup_wait_release = False
+                        elif not pickup_wait_release:
+                            pickup_wait_release = True
+                            if not pickup.active:
+                                lift.stop()
+                                jog.stop()
+                                held_keys.clear()
+                                state_reader.finish()
+                                if (pos_pub.get_num_connections() == 0
+                                        or pump_pub.get_num_connections() == 0):
+                                    safe_print(
+                                        "pickup needs the arm driver "
+                                        "(/position_write_topic and /pump_topic); "
+                                        "nothing was commanded."
+                                    )
+                                else:
+                                    pickup.start(now)
                         continue
 
                     if event not in (0, 1):
@@ -1023,8 +1518,10 @@ def main():
                         prior_action = term_last_action.get(ATTACH_KEY, -100.0)
                         term_last_action[ATTACH_KEY] = now
                         if now - prior_action >= TERM_ACTION_GAP:
+                            pickup.cancel("attach key")
                             attach_arm()
                     elif key == " ":
+                        pickup.cancel("space")
                         if was_lifting:
                             safe_print(
                                 "Lift canceled. Pump stays %s."
@@ -1035,6 +1532,7 @@ def main():
                         term_last_action["enter"] = now
                         if now - prior_action < TERM_ACTION_GAP:
                             continue
+                        pickup.cancel("pump key")
                         if not pump_on and pump_pub.get_num_connections() == 0:
                             safe_print("Pump driver unavailable.")
                             continue
@@ -1061,6 +1559,7 @@ def main():
                         term_last_action["0"] = now
                         if now - prior_action < TERM_ACTION_GAP:
                             continue
+                        pickup.cancel("0 key")
                         state_reader.finish()
                         pump_on = False
                         set_pump(False)
@@ -1084,6 +1583,56 @@ def main():
                                 % tuple(arm.current)
                             )
 
+            # Browser bridge: keyboard_web.py supplies real key-down/key-up
+            # states, so the base moves for exactly as long as a key is held.
+            if listener is not None and listener in ready:
+                try:
+                    new_client, _ = listener.accept()
+                except OSError:
+                    new_client = None
+                if new_client is not None:
+                    if client is not None:
+                        new_client.close()
+                    else:
+                        client = new_client
+                        client.setblocking(False)
+                        client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                        buffer = b""
+                        net_last = 0.0
+                        term_interlock = True
+                        term_last_movement = now
+                        move_keys.clear()
+                        turn_keys.clear()
+                        stop_base_now()
+                        safe_print(
+                            "browser base keyboard connected on %s:%d"
+                            % (BASE_HOST, BASE_PORT)
+                        )
+
+            if client is not None and client in ready:
+                disconnected = False
+                try:
+                    data = client.recv(8192)
+                    if not data:
+                        disconnected = True
+                    else:
+                        buffer += data
+                        if len(buffer) > 8192:
+                            disconnected = True
+                        else:
+                            *packets, buffer = buffer.split(b"\n")
+                            for raw in packets:
+                                state = parse_base_state(raw)
+                                if state is not None:
+                                    net_linear, net_turn, net_stop = state
+                                    net_last = time.monotonic()
+                                    if pickup.active and (net_linear or net_turn):
+                                        pickup.cancel("base input from the browser")
+                except OSError:
+                    disconnected = True
+                if disconnected:
+                    close_base_client("base bridge disconnected - base stopped")
+
             # Drive the arm every tick while a key is logically held, not only
             # when a key event arrives. Terminal key-repeat starts after a
             # delay (and Kitty taps can press+release in one read), so
@@ -1094,7 +1643,7 @@ def main():
             # of the same direction is not left latched in `blocked`.
             if not active and jog.directions != (0, 0, 0):
                 jog.stop()
-            if active:
+            if active and not pickup.active:
                 lift.stop()
                 if not term_interlock:
                     if arm.synced and pos_pub.get_num_connections() > 0:
@@ -1124,13 +1673,27 @@ def main():
                         safe_print("Arm motion needs a known pose and a connected driver.")
                         sync_warned = True
 
-            # Base target from every base key still held (computed each tick,
-            # so arm and base keys can run together).
-            move_live = move_keys.live(jog_time)
-            turn_live = turn_keys.live(jog_time)
-            if term_interlock:
+            # Automatic pickup state machine: one tick per loop, no sleeps.
+            if pickup.active:
+                pose = pickup.step(now, dt)
+                if pose is not None:
+                    publish_pose(*pose)
+                    dirty_pose = True
+                    last_target = now
+
+            # Base target: the browser bridge drives the base from exact
+            # key-up/key-down state. Only fall back to the terminal's
+            # key-repeat timing when no bridge client is attached.
+            if client is not None:
+                if net_stop or now - net_last > BODY_WATCHDOG:
+                    net_linear = net_turn = 0
+                target_linear = net_linear * LIN_SPEED
+                target_turn = net_turn * ANG_SPEED
+            elif term_interlock:
                 target_linear = target_turn = 0.0
             else:
+                move_live = move_keys.live(jog_time)
+                turn_live = turn_keys.live(jog_time)
                 target_linear = (
                     (LIN_SPEED if "w" in move_live else 0.0)
                     - (LIN_SPEED if "s" in move_live else 0.0)
@@ -1147,8 +1710,9 @@ def main():
             )
             set_base(actual_linear, actual_turn)
 
-            # Re-arm after 0 once movement keys have been quiet
-            if term_interlock and now - term_last_movement > TERM_REARM_PAUSE:
+            # Re-arm after 0 (or a bridge disconnect) once keys are quiet
+            if (term_interlock and client is None
+                    and now - term_last_movement > TERM_REARM_PAUSE):
                 term_interlock = False
                 safe_print("  keyboard rearmed - movement enabled")
 
@@ -1179,6 +1743,14 @@ def main():
             sys.stdout.write("\x1b[<u\x1b[?1004l")
             sys.stdout.flush()
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        if client is not None:
+            try:
+                client.close()
+            except OSError:
+                pass
+            client = None
+        if listener is not None:
+            listener.close()
         for _ in range(5):
             set_base(0.0, 0.0)
             time.sleep(0.02)
